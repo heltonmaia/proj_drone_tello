@@ -37,6 +37,7 @@ Este projeto está em constante evolução. Qualquer contribuição ou feedback 
 ---
 
 Exemplo de funcionamento
+
 ![vídeo](video.gif)
 
 
