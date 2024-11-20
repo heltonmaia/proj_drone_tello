@@ -1,6 +1,6 @@
 # **Logística Autônoma em Ambientes Fechados com Drones DJI Tello**  
 ## Participantes
-- [Helton Maia](heltonmaia.com) (professor)
+- [Helton Maia](https://heltonmaia.com/) (professor)
 - [Bruno Marques](https://sigaa.ufrn.br/sigaa/public/docente/portal.jsf?siape=1170845) (professor)
 - Murilo (aluno)
 
@@ -33,3 +33,8 @@ Este projeto tem como objetivo desenvolver um sistema de logística autônoma em
 O projeto busca transformar processos logísticos internos, promovendo eficiência, automação e acessibilidade. Além disso, oferece uma oportunidade de aprendizado prático em áreas como visão computacional, robótica e inteligência artificial.  
 
 Este projeto está em constante evolução. Qualquer contribuição ou feedback será muito bem-vindo!
+
+---
+Exemplo de funcionamento:
+
+
