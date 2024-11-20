@@ -4,11 +4,11 @@
 Este projeto tem como objetivo desenvolver um sistema de logística autônoma em ambientes fechados utilizando drones DJI Tello equipados com câmeras para identificar e navegar até QR codes. A proposta visa otimizar tarefas como transporte de pequenos itens, monitoramento e inventário em locais como escritórios, galpões e hospitais, oferecendo uma solução eficiente, flexível e de baixo custo.  
 
 ## **Principais Funcionalidades em Desenvolvimento:**  
-1. **Detecção de QR Codes:**  
+- **Detecção de QR Codes:**  
    - Uso de algoritmos de visão computacional com OpenCV para identificar QR codes em tempo real e extrair informações relevantes.  
-2. **Navegação Autônoma:**  
+- **Navegação Autônoma:**  
    - Controle do drone para deslocamento preciso até o QR code identificado, incluindo desvio de obstáculos.  
-3. **Gestão de Rotas:**  
+- **Gestão de Rotas:**  
    - Otimização das trajetórias para múltiplos pontos de entrega ou coleta.  
 
 ## **Ferramentas Utilizadas:**  
@@ -22,16 +22,10 @@ Este projeto tem como objetivo desenvolver um sistema de logística autônoma em
 - Testes em cenários controlados, simulando transporte de pequenos objetos.  
 
 ## **Próximos Passos:**  
-1. Melhorar a precisão da navegação autônoma.  
-2. Integrar um sistema de gerenciamento de múltiplas rotas.  
-3. Realizar testes extensivos em ambientes reais, como escritórios e pequenos armazéns.  
+- Melhorar a precisão da navegação autônoma.  
+- Integrar um sistema de gerenciamento de múltiplas rotas.  
+- Realizar testes extensivos em ambientes reais, como escritórios e pequenos armazéns.  
 
-## **Impacto Esperado:**  
 O projeto busca transformar processos logísticos internos, promovendo eficiência, automação e acessibilidade. Além disso, oferece uma oportunidade de aprendizado prático em áreas como visão computacional, robótica e inteligência artificial.  
-
-## **Como Contribuir:**  
-- Sugestões de melhorias no algoritmo.  
-- Testes em diferentes ambientes fechados.  
-- Implementação de novas funcionalidades.  
 
 Este projeto está em constante evolução. Qualquer contribuição ou feedback será muito bem-vindo!
