@@ -35,6 +35,9 @@ O projeto busca transformar processos logísticos internos, promovendo eficiênc
 Este projeto está em constante evolução. Qualquer contribuição ou feedback será muito bem-vindo!
 
 ---
-Exemplo de funcionamento:
+
+Exemplo de funcionamento
+![vídeo](teste-11_48_05-AM.mp4)
+
 
 
