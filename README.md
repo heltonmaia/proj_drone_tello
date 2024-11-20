@@ -2,7 +2,7 @@
 ## Participantes
 - [Helton Maia](https://heltonmaia.com/) (professor)
 - [Bruno Marques](https://sigaa.ufrn.br/sigaa/public/docente/portal.jsf?siape=1170845) (professor)
-- Murilo (aluno)
+- Murilo de Lima Barros (aluno)
 
 ## **Descrição do Projeto**  
 Este projeto tem como objetivo desenvolver um sistema de logística autônoma em ambientes fechados utilizando drones DJI Tello equipados com câmeras para identificar e navegar até QR codes. A proposta visa otimizar tarefas como transporte de pequenos itens, monitoramento e inventário em locais como escritórios, galpões e hospitais, oferecendo uma solução eficiente, flexível e de baixo custo.  
