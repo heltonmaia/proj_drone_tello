@@ -37,7 +37,7 @@ Este projeto está em constante evolução. Qualquer contribuição ou feedback 
 ---
 
 Exemplo de funcionamento
-![vídeo](teste-11_48_05-AM.mp4)
+![vídeo](video.gif)
 
 
 
