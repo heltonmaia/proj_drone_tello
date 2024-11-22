@@ -1,3 +1,4 @@
+import logging
 from tracking_base import tracking
 from detect_qr import process
 import time
@@ -7,6 +8,22 @@ pace = ' 20'
 pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back']
 start_time = time.time()  # Inicializa o tempo
 searching = False
+
+logging.basicConfig(
+    filename="codes/log.txt",
+    level=logging.INFO,
+    format="%(asctime)s - %(message)s",
+    datefmt="%d-%m-%Y %H:%M:%S"
+)
+
+def log_command(command, response=None):
+    '''
+    Registra um comando enviado e a resposta recebida no log.
+    Args:
+        command (str): Comando enviado ao drone.
+        response (str, opcional): Resposta recebida do drone.
+    '''
+    logging.info(f"{command}, {response}")
 
 def timer():
     '''
@@ -32,7 +49,8 @@ def search(tello, frame):
     '''
     response = tello.send_cmd('ccw 20')  # Rotaciona 20 graus
     time.sleep(0.01)                     # testar se resposta é exibida
-    print(f"Rotação enviada: {response}")
+    print(f"Rotação: {response}")
+    log_command('ccw 20', response)
     return frame
 
 def moves(tello, frame):
@@ -58,22 +76,28 @@ def moves(tello, frame):
             frame = search(tello, frame)
         elif old_move == 'follow': # necessário para que o drone não continue a se movimentar sem detecção de follow
             tello.send_rc_control(0, 0, 0, 0)
+            log_command('rc 0 0 0 0')
 
     if text == 'follow':
         frame = tracking(tello, frame)
+        log_command('follow') # ver como vai ficar isso
     
     if detections == 1 and text == 'land':
         while float(tello.get_state_field('h')) >= 13:
             tello.send_rc_control(0, 0, -70, 0)
         tello.send_cmd(str(text))
+        log_command(text)
     
     elif detections == 1 and text == 'takeoff' and old_move != 'takeoff':
         response = tello.send_cmd_return(text)
         print(f"{text}' '{response}")
+        log_command(text, response)
     
     elif detections == 1 and text in pace_moves:
         response = tello.send_cmd_return(f"{text}{pace}")
         print(f"{text}{pace}' '{response}")
+        log_command(f"{text}{pace}", response)
 
     old_move = text
+    print(f"Old move: {old_move}")
     return frame

@@ -18,10 +18,9 @@ Kp = 0.2
 Kd = 0.2
 
 width_detect = 0
-area_land = 0
 text = ''
-response = ''
 old_move = ''
+
 def tracking(tello, frame):
     '''
     Processa o frame para detectar QR codes e executa comandos no drone Tello com base no texto detectado.
@@ -31,7 +30,7 @@ def tracking(tello, frame):
     Returns:
         frame: Frame processado após a detecção e execução dos comandos.
     '''
-    global prevErrorX, prevErrorY, CenterX, CenterY, Kp, Kd, text, width_detect, area_land
+    global prevErrorX, prevErrorY, CenterX, CenterY, Kp, Kd, text, width_detect
     _, x1, y1, x2, y2, detections, text = process(frame)
     speedFB = 0
     cxDetect = (x2 + x1) // 2
