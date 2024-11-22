@@ -14,7 +14,7 @@ def process(frame):
     Args:
         frame: Frame de vídeo a ser processado para detecção de QR codes.
     Returns:
-        frame: Frame processado após a detecção e execução dos comandos.
+        [frame, x, y, x+w, y+h, len(decoded_objects), qr_text]
     '''
     decoded_objects = decode(frame)
     global x, y, w, h, data, qr_text
