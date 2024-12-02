@@ -5,7 +5,7 @@ from tracking_base import tracking, draw
 from detect_qr import process
 
 old_move = ''
-pace = ' 20'
+pace = ' 70'
 pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']
 searching = False
 stop_searching = threading.Event()
@@ -41,7 +41,7 @@ def search(tello):
     i = 0
     commands = ['cw 20', 'ccw 40']
     while not stop_searching.is_set() and not stop_receiving.is_set():
-        if time.time() - timer >= 5:                 # 5 segundos
+        if time.time() - timer >= 10:                 # 5 segundos
             response = tello.send_cmd(commands[i])   # Rotaciona 20 graus
             time.sleep(0.1)                          # Testar se resposta é exibida
             print(f"{commands[i]}, {response}")
