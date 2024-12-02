@@ -10,6 +10,7 @@ pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']
 searching = False
 stop_searching = threading.Event()
 stop_receiving = threading.Event()
+last_command = ''
 
 logging.basicConfig(
     filename="codes/log.txt",
@@ -20,15 +21,15 @@ logging.basicConfig(
 
 def log_command(command, response=None):
     '''
-    Registra um comando enviado e a resposta recebida no log.
+    Registra o comando enviado ao drone e a resposta recebida.
     Args:
         command (str): Comando enviado ao drone.
         response (str, opcional): Resposta recebida do drone.
     '''
-    if response is None:
-        logging.info(command)
-    else:
+    #global last_command
+    if command != old_move:
         logging.info(f"{command}, {response}")
+        #last_command = command
 
 def search(tello):
     '''
@@ -60,14 +61,9 @@ def moves(tello, frame):
     '''
     global old_move, pace, pace_moves, searching
     frame, x1, y1, x2, y2, detections, text = process(frame) # Agora process() retorna os valores de x1, y1, x2, y2, para ser chamada apenas uma vez
-    #frame, _, _, _, _, detections, text = process(frame)
+    #frame, _, _, _, _, detections, text = process(frame)        
 
-    if detections > 0:
-        if searching:
-            stop_searching.set() # Setar evento de parada
-            searching = False    # Parar busca
-
-    elif detections == 0 and old_move != 'land':
+    if detections == 0 and old_move != 'land': # Se pousou, não deve rotacionar
         if not searching:
             stop_searching.clear()                                         # Reseta o evento de parada
             search_thread = threading.Thread(target=search, args=(tello,)) # Cria a thread de busca
@@ -76,29 +72,34 @@ def moves(tello, frame):
 
         elif old_move == 'follow': # Necessário para que o drone não continue a se movimentar sem detecção de follow
             tello.send_rc_control(0, 0, 0, 0)
-            log_command('rc 0 0 0 0')
+            #log_command('rc 0 0 0 0')
 
-    if detections == 1 and text == 'follow':
-        frame = tracking(tello, frame, x1, y1, x2, y2, detections, text)
-        log_command(text)
+    elif detections == 1:
+        if searching:
+            stop_searching.set() # Setar evento de parada
+            searching = False    # Parar busca
 
-    elif detections == 1 and text == 'land':
-        while float(tello.get_state_field('h')) >= 13:
-            tello.send_rc_control(0, 0, -70, 0)
-        tello.send_cmd(str(text))
-        log_command(text)
+        if text == 'follow':
+            frame = tracking(tello, frame, x1, y1, x2, y2, detections, text)
+            log_command(text)
 
-    elif detections == 1 and text == 'takeoff' and old_move != 'takeoff':
-        response = tello.send_cmd_return(text)
-        time.sleep(1)
-        print(f"{text}, {response}")
-        log_command(f"{text}, {response}")
+        elif text == 'land':
+            while float(tello.get_state_field('h')) >= 13:
+                tello.send_rc_control(0, 0, -70, 0)
+            tello.send_cmd(str(text))
+            log_command(text)
 
-    elif detections == 1 and text in pace_moves:
-        response = tello.send_cmd_return(f"{text}{pace}")
-        frame = draw(frame, x1, y1, x2, y2, text)
-        print(f"{text}{pace}, {response}")
-        log_command(f"{text}{pace}, {response}")
+        elif text == 'takeoff' and old_move != 'takeoff':
+            response = tello.send_cmd_return(text)
+            time.sleep(1)
+            print(f"{text}, {response}")
+            log_command(f"{text}, {response}")
+
+        elif text in pace_moves:
+            response = tello.send_cmd_return(f"{text}{pace}")
+            frame = draw(frame, x1, y1, x2, y2, text)
+            print(f"{text}{pace}, {response}")
+            log_command(f"{text}{pace}, {response}")
 
     old_move = text
     #print(f"Old move: {old_move}")
