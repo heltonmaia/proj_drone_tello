@@ -1,9 +1,8 @@
 import numpy as np
 import cv2
-from detect_qr import process
 
-Width = 800
-Height = 600
+Width = 960
+Height = 720
 #coordenadas do centro
 CenterX = Width // 2
 CenterY = Height // 2
@@ -19,25 +18,29 @@ Kd = 0.2
 
 width_detect = 0
 text = ''
-old_move = ''
 
-def tracking(tello, frame):
+def tracking(tello, frame, x1, y1, x2, y2, detections, text):
     '''
     Processa o frame para detectar QR codes e executa comandos no drone Tello com base no texto detectado.
     Args:
         tello: Objeto representando o drone Tello, que possui métodos para enviar comandos e obter estado.
         frame: Frame de vídeo a ser processado para detecção de QR codes.
+        x1: Coordenada x do canto superior esquerdo do retângulo.
+        y1: Coordenada y do canto superior esquerdo do retângulo.
+        x2: Coordenada x do canto inferior direito do retângulo.
+        y2: Coordenada y do canto inferior direito do retângulo.
+        detections: Número de QR codes detectados no frame.
+        text: Texto detectado nos QR codes.
     Returns:
         frame: Frame processado após a detecção e execução dos comandos.
     '''
-    global prevErrorX, prevErrorY, CenterX, CenterY, Kp, Kd, text, width_detect
-    _, x1, y1, x2, y2, detections, text = process(frame)
+    global prevErrorX, prevErrorY, CenterX, CenterY, Kp, Kd
+    #_, x1, y1, x2, y2, detections, text = process(frame)
     speedFB = 0
     cxDetect = (x2 + x1) // 2
     cyDetect = (y2 + y1) // 2
 
     #PID - Speed Control
-    width_detect = x2 - x1
     area = (x2 - x1) * (y2 - y1)
     #print(f"Area: {area}")
     #print(f"DETECTIONS: {detections}")
@@ -72,13 +75,28 @@ def tracking(tello, frame):
     speedUD = int(np.clip(speedUD,-100,100))
     
     #print(f"FB: {speedFB}, UD: {speedUD}, YAW: {speedYaw}")
-    if(detections == 1 and text == 'dados de leitura'):
-        tello.send_rc_control(0, speedFB, speedUD, speedYaw)
-        print(f'FB: {speedFB}, UD: {speedUD}, Yaw: {speedYaw}')
+    tello.send_rc_control(0, speedFB, speedUD, speedYaw)
+    print(f'FB: {speedFB}, UD: {speedUD}, Yaw: {speedYaw}')
     
     #o erro atual vira o erro anterior
     prevErrorX = errorX
     prevErrorY = errorY
     return frame
 
+def draw(frame, x1, y1, x2, y2, text):
+    '''
+    Desenha um retângulo e o texto detectado no frame.
+    Args:
+        frame: Frame de vídeo a ser processado.
+        x1: Coordenada x do canto superior esquerdo do retângulo.
+        y1: Coordenada y do canto superior esquerdo do retângulo.
+        x2: Coordenada x do canto inferior direito do retângulo.
+        y2: Coordenada y do canto inferior direito do retângulo.
+        text: Texto a ser exibido no frame.
+    Returns:
+        frame: Frame com o retângulo e o texto desenhados.
+    '''
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 2)
+    cv2.putText(frame, text, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2)
+    return frame
 
