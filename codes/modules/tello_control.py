@@ -16,11 +16,16 @@ queue_lock = threading.Lock()
 response = None
 
 def readQueue(tello: object):
+    '''
+    Lê a fila de comandos e envia-os ao drone Tello.
+    Args:
+        tello: Objeto da classe TelloZune, que possui métodos para enviar comandos e obter estado.
+    '''
     while not stop_receiving.is_set():
+        command = None
         with queue_lock:   # Evita que a lista seja alterada enquanto é lida
             if command_queue:
                 command = command_queue.pop(0)
-                print(command)
         if command:        # Se houver comando na fila
             response = tello.send_cmd_return(command)
             print(f"{command}, {response}")
@@ -78,7 +83,7 @@ def moves(tello: object, frame: object) -> object:
             frame = follow(tello, frame, x1, y1, x2, y2, detections, text)
             logging.info(text)
 
-        elif text == 'land':
+        elif text == 'land' and old_move != 'land':
             while float(tello.get_state_field('h')) >= 13:
                 tello.send_rc_control(0, 0, -70, 0)
             tello.send_cmd(str(text))
@@ -95,7 +100,6 @@ def moves(tello: object, frame: object) -> object:
             if old_move != text: # Não deve fazer comandos repetidos
                 with queue_lock:
                     command_queue.append(f"{text}{pace}")
-                print(f"{text}{pace}, {response}")
                 logging.info(f"{text}{pace}, {response}")
 
     old_move = text
