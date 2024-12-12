@@ -1,8 +1,8 @@
 import logging
 import time
 import threading
-from tracking_base import tracking, draw
-from detect_qr import process
+from modules.tracking_base import follow, draw
+from modules.qr_processing import process
 
 old_move = ''
 pace = ' 70'
@@ -11,27 +11,22 @@ searching = False
 stop_searching = threading.Event()
 stop_receiving = threading.Event()
 last_command = ''
+command_queue = []
+queue_lock = threading.Lock()
+response = None
 
-logging.basicConfig(
-    filename="codes/log.txt",
-    level=logging.INFO,
-    format="%(asctime)s - %(message)s",
-    datefmt="%d-%m-%Y %H:%M:%S"
-)
+def readQueue(tello: object):
+    while not stop_receiving.is_set():
+        with queue_lock:   # Evita que a lista seja alterada enquanto é lida
+            if command_queue:
+                command = command_queue.pop(0)
+                print(command)
+        if command:        # Se houver comando na fila
+            response = tello.send_cmd_return(command)
+            print(f"{command}, {response}")
+        time.sleep(0.1)
 
-def log_command(command, response=None):
-    '''
-    Registra o comando enviado ao drone e a resposta recebida.
-    Args:
-        command (str): Comando enviado ao drone.
-        response (str, opcional): Resposta recebida do drone.
-    '''
-    #global last_command
-    if command != old_move:
-        logging.info(f"{command}, {response}")
-        #last_command = command
-
-def search(tello):
+def search(tello: object):
     '''
     Procura por QR codes rotacionando o drone Tello em 20 graus para a direita e 40 graus para a esquerda.
     Args:
@@ -45,12 +40,12 @@ def search(tello):
             response = tello.send_cmd(commands[i])   # Rotaciona 20 graus
             time.sleep(0.1)                          # Testar se resposta é exibida
             print(f"{commands[i]}, {response}")
-            log_command(commands[i], response)
+            logging.info(response)
             timer = time.time()
             i = (i + 1) % 2                          # Alterna entre 0 e 1
         #print((time.time() - timer).__round__(2)) # Ver contagem regressiva
 
-def moves(tello, frame):
+def moves(tello: object, frame: object) -> object:
     '''
     Processa o frame para detectar QR codes e executa comandos no drone Tello com base no texto detectado.
     Args:
@@ -59,7 +54,7 @@ def moves(tello, frame):
     Returns:
         frame: Frame processado após a detecção e execução dos comandos.
     '''
-    global old_move, pace, pace_moves, searching
+    global old_move, pace, pace_moves, searching, response
     frame, x1, y1, x2, y2, detections, text = process(frame) # Agora process() retorna os valores de x1, y1, x2, y2, para ser chamada apenas uma vez
     #frame, _, _, _, _, detections, text = process(frame)        
 
@@ -80,26 +75,28 @@ def moves(tello, frame):
             searching = False    # Parar busca
 
         if text == 'follow':
-            frame = tracking(tello, frame, x1, y1, x2, y2, detections, text)
-            log_command(text)
+            frame = follow(tello, frame, x1, y1, x2, y2, detections, text)
+            logging.info(text)
 
         elif text == 'land':
             while float(tello.get_state_field('h')) >= 13:
                 tello.send_rc_control(0, 0, -70, 0)
             tello.send_cmd(str(text))
-            log_command(text)
+            logging.info(text)
 
         elif text == 'takeoff' and old_move != 'takeoff':
             response = tello.send_cmd_return(text)
             time.sleep(1)
-            print(f"{text}, {response}")
-            log_command(f"{text}, {response}")
+            print(response)
+            logging.info(response)
 
         elif text in pace_moves:
-            response = tello.send_cmd_return(f"{text}{pace}")
             frame = draw(frame, x1, y1, x2, y2, text)
-            print(f"{text}{pace}, {response}")
-            log_command(f"{text}{pace}, {response}")
+            if old_move != text: # Não deve fazer comandos repetidos
+                with queue_lock:
+                    command_queue.append(f"{text}{pace}")
+                print(f"{text}{pace}, {response}")
+                logging.info(f"{text}{pace}, {response}")
 
     old_move = text
     #print(f"Old move: {old_move}")
