@@ -50,8 +50,9 @@ pip install tello_zune
 ```
 
 ### Funcionamento
-Com base na detecção de um QR code, o algoritmo envia comandos ao drone via wi-fi e processa dados recebidos da mesma forma. Ao conectar-se ao drone, basta executar o módulo main.py. Recomenda-se um local bem iluminado, para que o drone receba imagens nítidas e possa navegar adequadamente.
-Se o drone ler algum comando com passo, como "down 20", sendo o passo definido pelo usuário, o movimento será feito logo em seguida, caso não haja detecção por um período de tempo definido previamente o drone fará rotações em torno do próprio eixo na tentativa de encontrar um código válido. Caso o drone leia o comando "follow", o drone ajustará a própria posição com base nas coordenadas da detecção capturada.
+O algoritmo detecta QR codes, envia comandos ao drone via Wi-Fi e processa os dados recebidos. Para usar, conecte-se ao drone e execute main.py. Um local bem iluminado é essencial para imagens nítidas.
+
+Comandos como "down 20" executam movimentos com o passo definido pelo usuário. Sem detecção por um tempo pré-configurado, o drone rotaciona para buscar códigos. Com o comando "follow", ajusta sua posição conforme as coordenadas detectadas.
 
 #### Exemplos de comandos válidos:
 
