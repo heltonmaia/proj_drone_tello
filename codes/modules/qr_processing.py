@@ -3,7 +3,7 @@ from pyzbar.pyzbar import decode
 x, y, w, h = 0, 0, 0, 0
 qr_text = ''
 
-def process(frame):
+def process(frame: object) -> list:
     '''
     Processa o frame para detectar QR codes.
     Args:
