@@ -21,9 +21,9 @@ Este projeto tem como objetivo desenvolver um sistema de logística autônoma em
 - **Algoritmos:** Detecção de QR codes, planejamento de trajetórias e controle autônomo.  
 
 ## **Status Atual:**  
-- Implementação do sistema de leitura de QR codes em tempo real.  
 - Desenvolvimento inicial do algoritmo de navegação baseado em visão computacional.  
-- Testes em cenários controlados, simulando transporte de pequenos objetos.  
+- Testes em cenários controlados, simulando transporte de pequenos objetos. 
+- Melhoria do desempenho. 
 
 ## **Próximos Passos:**  
 - Melhorar a precisão da navegação autônoma.  
@@ -33,6 +33,40 @@ Este projeto tem como objetivo desenvolver um sistema de logística autônoma em
 O projeto busca transformar processos logísticos internos, promovendo eficiência, automação e acessibilidade. Além disso, oferece uma oportunidade de aprendizado prático em áreas como visão computacional, robótica e inteligência artificial.  
 
 Este projeto está em constante evolução. Qualquer contribuição ou feedback será muito bem-vindo!
+
+## **Utilização:**
+### Instalação
+
+```bash
+# Clone o repositório
+git clone https://github.com/heltonmaia/proj_drone_tello
+```
+
+```bash
+# Instalar dependências
+pip install opencv-python
+pip install pyzbar
+pip install tello_zune
+```
+
+### Funcionamento
+O algoritmo detecta QR codes, envia comandos ao drone via Wi-Fi e processa os dados recebidos. Para usar, conecte-se ao drone e execute main.py. Um local bem iluminado é essencial para imagens nítidas.
+
+Comandos como "down 20" executam movimentos com o passo definido pelo usuário. Sem detecção por um tempo pré-configurado, o drone rotaciona para buscar códigos. Com o comando "follow", ajusta sua posição conforme as coordenadas detectadas.
+
+#### Exemplos de comandos válidos:
+
+| Comando         | Descrição                    |
+|-----------------|------------------------------|
+| `takeoff`       | Decolar                      |
+| `land`          | Pousar                       |
+| `up x`          | Subir x cm                   |
+| `down x`        | Descer x cm                  |
+| `right x`       | Mover-se à direita x cm      |
+| `left x`        | Mover-se à esquerda x cm     |
+| `forward x`     | Mover-se para frente x cm    |
+| `back x`        | Mover-se para trás x cm      |
+| `follow`        | Seguir                       |
 
 ---
 

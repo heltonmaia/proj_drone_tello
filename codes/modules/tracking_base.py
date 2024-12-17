@@ -19,7 +19,7 @@ Kd = 0.2
 width_detect = 0
 text = ''
 
-def tracking(tello, frame, x1, y1, x2, y2, detections, text):
+def follow(tello: object, frame: object, x1: int, y1: int, x2: int, y2: int, detections: int, text: str) -> object:
     '''
     Processa o frame para detectar QR codes e executa comandos no drone Tello com base no texto detectado.
     Args:
@@ -83,7 +83,7 @@ def tracking(tello, frame, x1, y1, x2, y2, detections, text):
     prevErrorY = errorY
     return frame
 
-def draw(frame, x1, y1, x2, y2, text):
+def draw(frame: object, x1: int, y1: int, x2: int, y2: int, text: str) -> object:
     '''
     Desenha um retângulo e o texto detectado no frame.
     Args:
