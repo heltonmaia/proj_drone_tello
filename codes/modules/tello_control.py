@@ -12,7 +12,7 @@ stop_searching = threading.Event()
 stop_receiving = threading.Event()
 command_queue = []
 queue_lock = threading.Lock()
-response = None
+response = ''
 
 def readQueue(tello: object):
     '''
@@ -27,8 +27,10 @@ def readQueue(tello: object):
                 command = command_queue.pop(0)
         if command:        # Se houver comando na fila
             response = tello.send_cmd_return(command)
+            time.sleep(3)
             print(f"{command}, {response}")
-        time.sleep(0.1)
+        time.sleep(3)
+
 
 def search(tello: object):
     '''
@@ -38,9 +40,9 @@ def search(tello: object):
     '''
     timer = time.time()
     i = 0
-    commands = ['cw 20', 'ccw 40']
+    commands = ['ccw 20', 'cw 50']
     while not stop_searching.is_set() and not stop_receiving.is_set():
-        if time.time() - timer >= 10:                # 10 segundos
+        if time.time() - timer >= 5:                 # 10 segundos
             response = tello.send_cmd(commands[i])   # Rotaciona 20 graus
             time.sleep(0.1)                          # Testar se resposta é exibida
             print(f"{commands[i]}, {response}")
@@ -58,7 +60,7 @@ def moves(tello: object, frame: object) -> object:
     Returns:
         frame: Frame processado após a detecção e execução dos comandos.
     '''
-    global old_move, pace, pace_moves, searching, response
+    global old_move, pace, pace_moves, searching, response, command_queue
     frame, x1, y1, x2, y2, detections, text = process(frame) # Agora process() retorna os valores de x1, y1, x2, y2, para ser chamada apenas uma vez
 
     if detections == 0 and old_move != 'land': # Se pousou, não deve rotacionar
