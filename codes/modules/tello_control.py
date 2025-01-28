@@ -1,8 +1,8 @@
 import logging
 import time
 import threading
-from modules.tracking_base import follow, draw
-from modules.qr_processing import process
+from .tracking_base import follow, draw
+from .qr_processing import process
 
 old_move = ''
 pace = ' 70'

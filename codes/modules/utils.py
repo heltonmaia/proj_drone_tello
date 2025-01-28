@@ -1,6 +1,6 @@
 import logging
 
-def configureLogging(log_file: str = 'codes/log.txt'):
+def configureLogging(log_file: str = 'log.txt'):
     '''
     Configura o logging para salvar mensagens em um arquivo de log.
     Args:
