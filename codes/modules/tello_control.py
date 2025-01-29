@@ -9,28 +9,7 @@ pace = ' 70'
 pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']
 searching = False
 stop_searching = threading.Event()
-stop_receiving = threading.Event()
-command_queue = []
-queue_lock = threading.Lock()
 response = ''
-
-def readQueue(tello: object):
-    '''
-    Lê a fila de comandos e envia-os ao drone Tello.
-    Args:
-        tello: Objeto da classe TelloZune, que possui métodos para enviar comandos e obter estado.
-    '''
-    while not stop_receiving.is_set():
-        command = None
-        with queue_lock:   # Evita que a lista seja alterada enquanto é lida
-            if command_queue:
-                command = command_queue.pop(0)
-        if command:        # Se houver comando na fila
-            response = tello.send_cmd_return(command)
-            time.sleep(3)
-            print(f"{command}, {response}")
-        time.sleep(3)
-
 
 def search(tello: object):
     '''
@@ -41,7 +20,7 @@ def search(tello: object):
     timer = time.time()
     i = 0
     commands = ['ccw 20', 'cw 50']
-    while not stop_searching.is_set() and not stop_receiving.is_set():
+    while not stop_searching.is_set() and not tello.stop_receiving.is_set():
         if time.time() - timer >= 5:                 # 10 segundos
             response = tello.send_cmd(commands[i])   # Rotaciona 20 graus
             time.sleep(0.1)                          # Testar se resposta é exibida
@@ -49,6 +28,7 @@ def search(tello: object):
             logging.info(response)
             timer = time.time()
             i = (i + 1) % 2                          # Alterna entre 0 e 1
+            time.sleep(0.01)
         #print((time.time() - timer).__round__(2)) # Ver contagem regressiva
 
 def moves(tello: object, frame: object) -> object:
@@ -97,8 +77,8 @@ def moves(tello: object, frame: object) -> object:
         elif text in pace_moves:
             frame = draw(frame, x1, y1, x2, y2, text)
             if old_move != text: # Não deve fazer comandos repetidos
-                with queue_lock:
-                    command_queue.append(f"{text}{pace}")
+                with tello.queue_lock:
+                    tello.command_queue.append(f"{text}{pace}")
                     #print(command_queue)
                 logging.info(f"{text}{pace}, {response}")
 
