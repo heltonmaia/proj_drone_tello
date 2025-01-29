@@ -1,10 +1,10 @@
 import streamlit as st
 import time
-from drone_controller import DroneController
 import cv2
+from tello_zune import TelloZune
 
 # Inicialização
-controller = DroneController()
+tello = TelloZune()
 
 # Configuração do layout da interface
 st.title("DJI Tello")
@@ -35,14 +35,14 @@ ultimo_tempo = time.time()
 try:
     while True:
         # Captura e processamento do frame
-        frame = controller.get_frame()
+        frame = tello.get_frame()
         if frame is None:
             st.warning("Fim da captura de vídeo.")
             break
 
         # Atualiza informações a cada 20 segundos
         if time.time() - ultimo_tempo >= 20:
-            bat, height, fps, pres, time_elapsed = controller.get_drone_info()
+            bat, height, fps, pres, time_elapsed = tello.get_info()
             update_info(bat, height, fps, pres, time_elapsed)
             ultimo_tempo = time.time()
 
@@ -54,4 +54,4 @@ except Exception as e:
     st.error(f"Erro: {e}")
 finally:
     # Finalização
-    controller.release()
+    tello.release()
