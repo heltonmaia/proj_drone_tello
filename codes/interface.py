@@ -1,10 +1,14 @@
 import streamlit as st
 import time
 import cv2
+import modules.tello_control as tello_control
 from tello_zune import TelloZune
 
 # Inicialização
 tello = TelloZune()
+#cap = cv2.VideoCapture(0)
+tello.start_tello()
+tello.simulate = True
 
 # Configuração do layout da interface
 st.title("DJI Tello")
@@ -26,25 +30,39 @@ def update_info(bat, height, fps, pres, time_elapsed):
     time_placeholder.write(f"Tempo de voo: {time_elapsed} s")
 
 # Exibição do vídeo capturado
-st.header("Vídeo")
+st.header("Câmera")
 frame_placeholder = st.empty()
+takeoff = st.button("Decolar")
+land = st.button("Pousar")
 
 # Variável para controle de tempo
-ultimo_tempo = time.time()
+timer = time.time()
 
 try:
     while True:
         # Captura e processamento do frame
+        #ret, frame = cap.read()
         frame = tello.get_frame()
         if frame is None:
             st.warning("Fim da captura de vídeo.")
             break
 
         # Atualiza informações a cada 20 segundos
-        if time.time() - ultimo_tempo >= 20:
+        if time.time() - timer >= 20:
             bat, height, fps, pres, time_elapsed = tello.get_info()
             update_info(bat, height, fps, pres, time_elapsed)
-            ultimo_tempo = time.time()
+            timer = time.time()
+
+        # Processamento
+        frame = tello_control.moves(tello, frame)
+
+        # Botões de controle
+        if takeoff:
+            tello.send_cmd("takeoff")
+            takeoff = False
+        if land:
+            tello.send_cmd("land")
+            land = False
 
         # Converte para exibição no Streamlit
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -54,4 +72,5 @@ except Exception as e:
     st.error(f"Erro: {e}")
 finally:
     # Finalização
-    tello.release()
+    tello.end_tello()
+    tello.moves_thread.join()
