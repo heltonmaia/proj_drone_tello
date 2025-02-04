@@ -1,7 +1,6 @@
 import cv2
 from tello_zune import TelloZune
 import modules.tello_control as tello_control
-import time
 """
 Módulo principal para controle do drone Tello.
 Este arquivo inicializa a captura de vídeo, faz as configurações iniciais e direciona o fluxo de controle do drone.
@@ -23,19 +22,20 @@ Como executar:
 """
 
 # Inicialização
-#cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
+cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
 tello = TelloZune() # Cria objeto da classe TelloZune
-tello.start_tello() # Inicia a comunicação com o drone
+#tello.start_tello() # Inicia a comunicação com o drone
 tello.simulate=True
+tello_control.enable_search = True # Ativa a busca
 
 try:
     while True:
         # Captura
-        #ret, frame = cap.read() # Captura de vídeo da webcam
-        frame = tello.get_frame()
+        ret, frame = cap.read() # Captura de vídeo da webcam
+        #frame = tello.get_frame()
         cv2.putText(frame, f"FPS: {tello.calc_fps()}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (10, 255, 0), 2)
         cv2.putText(frame, f"Bat: {tello.get_battery()}%", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (10, 255, 0), 2)
-        #frame = cv2.resize(frame, (960, 720))
+        frame = cv2.resize(frame, (960, 720))
 
         # Tratamento
         frame = tello_control.moves(tello, frame)
@@ -48,7 +48,7 @@ try:
             break
 finally:
     # Finalização
-    #cap.release()
-    tello.end_tello()
+    cap.release()
+    #tello.end_tello()
     cv2.destroyAllWindows()
     tello.moves_thread.join() # Aguarda a thread de movimentos encerrar

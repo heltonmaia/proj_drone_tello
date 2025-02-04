@@ -47,6 +47,7 @@ git clone https://github.com/heltonmaia/proj_drone_tello
 pip install opencv-python
 pip install pyzbar
 pip install tello_zune
+pip install streamlit
 ```
 
 ### Funcionamento

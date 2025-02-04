@@ -8,8 +8,10 @@ old_move = ''
 pace = ' 70'
 pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']
 searching = False
+enable_search = False
 stop_searching = threading.Event()
 response = ''
+log_messages = []
 
 def search(tello: object):
     '''
@@ -20,12 +22,13 @@ def search(tello: object):
     timer = time.time()
     i = 0
     commands = ['ccw 20', 'cw 50']
-    while not stop_searching.is_set() and not tello.stop_receiving.is_set():
-        if time.time() - timer >= 5:                 # 10 segundos
-            response = tello.send_cmd(commands[i])   # Rotaciona 20 graus
+    while not stop_searching.is_set() and not tello.stop_receiving.is_set() and enable_search:
+        if time.time() - timer >= 10:                # 10 segundos
+            response = tello.send_cmd(commands[i])   # Rotaciona
             time.sleep(0.1)                          # Testar se resposta é exibida
             print(f"{commands[i]}, {response}")
             #logging.info(response)
+            log_messages.append(f"{commands[i]}, {response}\n")
             timer = time.time()
             i = (i + 1) % 2                          # Alterna entre 0 e 1
             time.sleep(0.01)
@@ -40,7 +43,7 @@ def moves(tello: object, frame: object) -> object:
     Returns:
         frame: Frame processado após a detecção e execução dos comandos.
     '''
-    global old_move, pace, pace_moves, searching, response
+    global old_move, pace, pace_moves, searching, response, enable_search
     frame, x1, y1, x2, y2, detections, text = process(frame) # Agora process() retorna os valores de x1, y1, x2, y2, para ser chamada apenas uma vez
 
     if detections == 0 and old_move != 'land': # Se pousou, não deve rotacionar
