@@ -4,73 +4,92 @@ import cv2
 import modules.tello_control as tello_control
 from tello_zune import TelloZune
 
-# Inicialização
-tello = TelloZune()
-#cap = cv2.VideoCapture(0)
-tello.start_tello()
-tello.simulate = True
+# Inicialização do Drone
+if "tello" not in st.session_state:
+    st.session_state.tello = TelloZune()
+    #st.session_state.tello.start_tello()
+    st.session_state.tello.simulate = True  # Simulação ativa
+    st.session_state.command_log = []  # Armazena os comandos enviados
 
-# Configuração do layout da interface
-st.title("DJI Tello")
-st.sidebar.header("Informações do Drone")
+tello = st.session_state.tello
+st.session_state.last_update = time.time()
 
-# Espaços reservados para exibição das informações
-bat_placeholder = st.sidebar.empty()
-height_placeholder = st.sidebar.empty()
-fps_placeholder = st.sidebar.empty()
-pres_placeholder = st.sidebar.empty()
-time_placeholder = st.sidebar.empty()
+# Inicialização da webcam
+cap = cv2.VideoCapture(0)
 
-# Função para atualizar as informações
-def update_info(bat, height, fps, pres, time_elapsed):
-    bat_placeholder.write(f"Bateria: {bat}%")
-    height_placeholder.write(f"Altura: {height} cm")
-    fps_placeholder.write(f"FPS: {fps}")
-    pres_placeholder.write(f"Pressão: {pres}")
-    time_placeholder.write(f"Tempo de voo: {time_elapsed} s")
+# Configuração da Interface
+st.set_page_config(layout="wide")  # Define a interface para ocupar toda a largura
 
-# Exibição do vídeo capturado
-st.header("Câmera")
-frame_placeholder = st.empty()
-takeoff = st.button("Decolar")
-land = st.button("Pousar")
+# Layout: 70% vídeo / 30% comandos
+col1, col2 = st.columns([3, 2])
 
-# Variável para controle de tempo
-timer = time.time()
+with col1:
+    st.title("DJI Tello")
+    st.header("Câmera")
+    frame_placeholder = st.empty()
 
-try:
-    while True:
-        # Captura e processamento do frame
-        #ret, frame = cap.read()
-        frame = tello.get_frame()
-        if frame is None:
-            st.warning("Fim da captura de vídeo.")
-            break
+with col2:
+    st.sidebar.header("Info")
+    bat_placeholder = st.sidebar.empty()
+    height_placeholder = st.sidebar.empty()
+    fps_placeholder = st.sidebar.empty()
+    pres_placeholder = st.sidebar.empty()
+    time_placeholder = st.sidebar.empty()
+    
+    st.sidebar.header("Log")
+    command_log_placeholder = st.sidebar.empty()
 
-        # Atualiza informações a cada 20 segundos
-        if time.time() - timer >= 20:
-            bat, height, fps, pres, time_elapsed = tello.get_info()
-            update_info(bat, height, fps, pres, time_elapsed)
-            timer = time.time()
+# Atualiza Informações
+def update_info():
+    #bat, height, fps, pres, time_elapsed = tello.get_info()
+    bat, height, fps, pres, time_elapsed = 20, 50, 30, 1000, 100
 
-        # Processamento
+    bat_placeholder.write(f"Bateria: {bat if bat is not None else 'N/A'}%")
+    height_placeholder.write(f"Altura: {float(height) if height is not None else 'N/A'} cm")
+    fps_placeholder.write(f"FPS: {fps if fps is not None else 'N/A'}")
+    pres_placeholder.write(f"Pressão: {pres if pres is not None else 'N/A'}")
+    time_placeholder.write(f"Tempo de voo: {time_elapsed if time_elapsed is not None else 'N/A'} s")
+    print("Atualizado")
+
+# Função para registrar comandos
+def log_command(command):
+    st.session_state.command_log.append(command)
+    print("append")
+    command_log_placeholder.write("\n".join(st.session_state.command_log))
+
+# Botões de Controle
+if st.button("Decolar"):
+    tello.send_cmd("takeoff")
+    log_command("takeoff")
+
+if st.button("Pousar"):
+    tello.send_cmd("land")
+    log_command("land")
+
+# Atualiza informações do drone a cada 10 segundos
+if "last_update" not in st.session_state:
+    st.session_state.last_update = time.time()
+
+if time.time() - st.session_state.last_update >= 10:
+    update_info()
+    st.session_state.last_update = time.time()
+
+# Finalização segura
+if st.button("Encerrar Drone"):
+    #tello.end_tello()
+    cap.release()
+    del st.session_state.tello  # Remove a instância do drone
+    st.stop()  # Encerra a execução do script
+
+# Atualização contínua sem um loop infinito
+while True:
+    ret, frame = cap.read()
+    if ret:
         frame = tello_control.moves(tello, frame)
-
-        # Botões de controle
-        if takeoff:
-            tello.send_cmd("takeoff")
-            takeoff = False
-        if land:
-            tello.send_cmd("land")
-            land = False
-
-        # Converte para exibição no Streamlit
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frame_placeholder.image(frame, channels="RGB", use_container_width=True)
-
-except Exception as e:
-    st.error(f"Erro: {e}")
-finally:
-    # Finalização
-    tello.end_tello()
-    tello.moves_thread.join()
+    else:
+        st.warning("Sem imagem da webcam.")
+    
+    update_info()
+    time.sleep(0.001)  # Ajuste no tempo para evitar sobrecarga
