@@ -8,38 +8,41 @@ from tello_zune import TelloZune
 # Inicialização do Drone
 if "tello" not in st.session_state:
     st.session_state.tello = TelloZune()
-    st.session_state.tello.simulate = True  # Simulação ativa
+    st.session_state.tello.simulate = True
     st.session_state.command_log = []  # Inicializa o log
-    st.session_state.enable_search = True  # Ativa a busca
+    #st.session_state.enable_search = True  # Ativa a busca
 
 tello = st.session_state.tello
 st.session_state.last_update = time.time()
-
-# Configurar o tello_control para ativar a busca
 tello_control.enable_search = True
 tello_control.stop_searching.clear()
 
-# Inicialização da webcam
-cap = cv2.VideoCapture(0)
+# Iniciar o drone apenas se ele ainda não estiver conectado
+if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
+    tello.start_tello()
+#cap = cv2.VideoCapture(0)
 
 # Configuração da Interface
 st.set_page_config(layout="wide")  
 
 # Placeholders para vídeo, informações e log
 frame_placeholder = st.empty()
+fps_placeholder = st.empty()
 info_placeholder = st.empty()
 log_placeholder = st.empty()
 
 # Função para atualizar as informações do drone (exemplo com dados fictícios)
 def update_info():
-    bat, height, fps, pres, time_elapsed = 20, 50, 30, 1000, 100
+    #bat, height, fps, pres, time_elapsed = 20, 50, 30, 1000, 100
+    bat, height, temph, pres, time_elapsed = tello.get_info()
     info_str = (
-        "Informações\n"
         f"Bateria: {bat if bat is not None else 'N/A'}%\n"
         f"Altura: {height if height is not None else 'N/A'} cm\n"
-        f"FPS: {fps if fps is not None else 'N/A'}\n"
+        f"Temperatura: {temph if temph is not None else 'N/A'}C\n"
         f"Pressão: {pres if pres is not None else 'N/A'}\n"
         f"Tempo de voo: {time_elapsed if time_elapsed is not None else 'N/A'} s\n"
+        "\n"
+        "# Log\n"
     )
     return info_str
 
@@ -53,9 +56,12 @@ with st.sidebar:
         tello.send_cmd("land")
         st.session_state.command_log.append("land")
     if st.button("Encerrar Drone"):
-        cap.release()
+        #cap.release()
+        tello.end_tello()
+        st.session_state.tello.stop_receiving.set()
+        tello.moves_thread.join()
         del st.session_state.tello
-        st.stop()  
+        st.stop()
     
     st.write("---")
     st.subheader("Enviar Comando")
@@ -75,16 +81,19 @@ if not tello_control.searching:
 
 # Loop principal da interface
 while True:
-    ret, frame = cap.read()
-    if ret:
-        frame = tello_control.moves(tello, frame)
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        frame_placeholder.image(frame, channels="RGB", use_container_width=True)
-    else:
-        st.warning("Sem imagem da webcam.")
+    #ret, frame = cap.read()
+    frame = tello.get_frame()
+    frame = tello_control.moves(tello, frame)
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame_placeholder.image(frame, channels="RGB")
+    
+    fps = tello.calc_fps()
+    fps_placeholder.text(f"FPS: {fps}")
 
-    # Atualiza informações do drone
-    info_placeholder.text(update_info())
+    # Atualiza informações do drone a cada 5 segundos
+    if time.time() - st.session_state.last_update >= 5:
+        st.session_state.last_update = time.time()
+        info_placeholder.text(update_info())
 
     # Pegar logs da variável global e transferir para o session_state
     if "command_log" not in st.session_state:
