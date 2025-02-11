@@ -47,10 +47,21 @@ git clone https://github.com/heltonmaia/proj_drone_tello
 pip install opencv-python
 pip install pyzbar
 pip install tello_zune
+pip install streamlit
 ```
 
 ### Funcionamento
-O algoritmo detecta QR codes, envia comandos ao drone via Wi-Fi e processa os dados recebidos. Para usar, conecte-se ao drone e execute main.py. Um local bem iluminado é essencial para imagens nítidas.
+O algoritmo detecta QR codes, envia comandos ao drone via Wi-Fi e processa os dados recebidos. Para usar, conecte-se à rede WI-FI do drone. Um local bem iluminado é essencial para imagens nítidas.
+
+#### Local
+Para visualizar os dados do drone em sua máquina execute o módulo main.py
+
+#### Interface Web
+Para utilizar a interface execute o comando:
+```bash
+# Em proj_drone_tello/codes/
+streamlit run interface.py
+```
 
 Comandos como "down 20" executam movimentos com o passo definido pelo usuário. Sem detecção por um tempo pré-configurado, o drone rotaciona para buscar códigos. Com o comando "follow", ajusta sua posição conforme as coordenadas detectadas.
 
