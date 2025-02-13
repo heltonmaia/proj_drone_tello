@@ -25,7 +25,7 @@ Como executar:
 # Inicialização
 #cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
 tello = TelloZune() # Cria objeto da classe TelloZune
-tello.simulate = False
+tello.simulate = False # False: o drone decola; True: simula o voo
 tello.start_tello() # Inicia a comunicação com o drone
 #tello_control.enable_search = True # Ativa a busca
 timer = time.time()
