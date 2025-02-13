@@ -12,6 +12,7 @@ enable_search = False
 stop_searching = threading.Event()
 response = ''
 log_messages = []
+last_command_time = {} # Dicionário para armazenar o tempo do último envio de cada comando
 
 def search(tello: object):
     '''
@@ -79,11 +80,14 @@ def moves(tello: object, frame: object) -> object:
 
         elif text in pace_moves:
             frame = draw(frame, x1, y1, x2, y2, text)
-            if old_move != text: # Não deve fazer comandos repetidos
-                with tello.queue_lock:
-                    tello.command_queue.append(f"{text}{pace}")
+            current_time = time.time()
+            last_time = last_command_time.get(text, 0)               # Se não existir, retorna 0
+            if old_move != text or (current_time - last_time >= 10): # Se o comando for diferente do anterior ou se passaram 10 segundos desde o repetido
+                with tello.queue_lock:                               # Bloqueia a fila de comandos
+                    tello.command_queue.append(f"{text}{pace}")      # Adiciona o comando à fila
                     #print(command_queue)
                 logging.info(f"{text}{pace}, {response}")
+                last_command_time[text] = current_time               # Atualiza o tempo do último comando de text
 
     old_move = text
     #print(f"Old move: {old_move}")

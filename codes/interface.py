@@ -20,7 +20,8 @@ tello_control.stop_searching.clear()
 # Iniciar o drone apenas se ele ainda não estiver conectado
 if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
     tello.start_tello()
-#cap = cv2.VideoCapture(0)
+    #pass
+#cap = cv2.VideoCapture(0) # webcam
 
 # Configuração da Interface
 st.set_page_config(layout="wide")  
@@ -32,8 +33,12 @@ info_placeholder = st.empty()
 log_placeholder = st.empty()
 
 # Função para atualizar as informações do drone (exemplo com dados fictícios)
-def update_info():
-    #bat, height, fps, pres, time_elapsed = 20, 50, 30, 1000, 100
+def update_info() -> str:
+    """Atualiza as informações do drone.
+    Returns:
+        info_str: String com as informações do drone.
+    """
+    #bat, height, temph, pres, time_elapsed = 20, 50, 80, 1000, 100
     bat, height, temph, pres, time_elapsed = tello.get_info()
     info_str = (
         f"Bateria: {bat if bat is not None else 'N/A'}%\n"
