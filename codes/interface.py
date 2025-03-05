@@ -9,8 +9,8 @@ from tello_zune import TelloZune
 if "tello" not in st.session_state:
     st.session_state.tello = TelloZune()
     st.session_state.tello.simulate = True
-    st.session_state.command_log = []  # Inicializa o log
-    #st.session_state.enable_search = True  # Ativa a busca
+    st.session_state.command_log = []
+    st.session_state.params_initialized = False  # Controle de inicialização
 
 tello = st.session_state.tello
 st.session_state.last_update = time.time()
@@ -19,39 +19,86 @@ tello_control.stop_searching.clear()
 
 # Iniciar o drone apenas se ele ainda não estiver conectado
 if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
-    tello.start_tello()
-    #pass
-#cap = cv2.VideoCapture(0) # webcam
+    #tello.start_tello()
+    pass
+cap = cv2.VideoCapture(0) # webcam
 
 # Configuração da Interface
-st.set_page_config(layout="wide")  
+st.set_page_config(layout="wide")
 
-# Placeholders para vídeo, informações e log
-frame_placeholder = st.empty()
-fps_placeholder = st.empty()
-info_placeholder = st.empty()
-log_placeholder = st.empty()
+# Layout Principal
+left_col, right_col = st.columns([3, 1])  # 3:1 proporção entre vídeo e parâmetros
 
-# Função para atualizar as informações do drone (exemplo com dados fictícios)
-def update_info() -> str:
-    """Atualiza as informações do drone.
-    Returns:
-        info_str: String com as informações do drone.
-    """
-    #bat, height, temph, pres, time_elapsed = 20, 50, 80, 1000, 100
+# Placeholders dinâmicos
+frame_placeholder = left_col.empty()
+log_placeholder = st.empty()  # Log abaixo de todo o conteúdo
+
+# Inicialização dos elementos da coluna direita
+if not st.session_state.params_initialized:
+    with right_col:
+        # Container para bateria
+        with st.container():
+            bat_col1, bat_col2 = st.columns([1, 3])
+            with bat_col1:
+                st.image("../images/battery_icon.png", width=40)
+            with bat_col2:
+                st.session_state.battery_value = st.empty()
+
+        # Container para altura
+        with st.container():
+            height_col1, height_col2 = st.columns([1, 3])
+            with height_col1:
+                st.image("../images/height_icon.png", width=40)
+            with height_col2:
+                st.session_state.height_value = st.empty()
+
+        # Container para temperatura
+        with st.container():
+            temp_col1, temp_col2 = st.columns([1, 3])
+            with temp_col1:
+                st.image("../images/temp_icon.png", width=40)
+            with temp_col2:
+                st.session_state.temp_value = st.empty()
+
+        # Container para pressão
+        with st.container():
+            pres_col1, pres_col2 = st.columns([1, 3])
+            with pres_col1:
+                st.image("../images/pressure_icon.png", width=40)
+            with pres_col2:
+                st.session_state.pres_value = st.empty()
+
+        # Container para tempo de voo
+        with st.container():
+            time_col1, time_col2 = st.columns([1, 3])
+            with time_col1:
+                st.image("../images/time_icon.png", width=40)
+            with time_col2:
+                st.session_state.time_value = st.empty()
+
+        # Container para FPS
+        with st.container():
+            fps_col1, fps_col2 = st.columns([1, 3])
+            with fps_col1:
+                st.image("../images/fps_icon.png", width=40)
+            with fps_col2:
+                st.session_state.fps_value = st.empty()
+
+    st.session_state.params_initialized = True
+
+# Função para atualizar valores
+def update_values():
+    """Atualiza os valores dos parâmetros dinamicamente"""
     bat, height, temph, pres, time_elapsed = tello.get_info()
-    info_str = (
-        f"Bateria: {bat if bat is not None else 'N/A'}%\n"
-        f"Altura: {height if height is not None else 'N/A'} cm\n"
-        f"Temperatura: {temph if temph is not None else 'N/A'}C\n"
-        f"Pressão: {pres if pres is not None else 'N/A'}\n"
-        f"Tempo de voo: {time_elapsed if time_elapsed is not None else 'N/A'} s\n"
-        "\n"
-        "# Log\n"
-    )
-    return info_str
+    
+    with right_col:
+        st.session_state.battery_value.markdown(f"**{bat if bat is not None else 'N/A'}%**")
+        st.session_state.height_value.markdown(f"**{height if height is not None else 'N/A'} cm**")
+        st.session_state.temp_value.markdown(f"**{temph if temph is not None else 'N/A'}°C**")
+        st.session_state.pres_value.markdown(f"**{pres if pres is not None else 'N/A'}**")
+        st.session_state.time_value.markdown(f"**{time_elapsed if time_elapsed is not None else 'N/A'} s**")
 
-# Sidebar: Botões de controle e entrada de comando
+# Sidebar
 with st.sidebar:
     st.header("Controles")
     if st.button("Decolar"):
@@ -61,13 +108,12 @@ with st.sidebar:
         tello.send_cmd("land")
         st.session_state.command_log.append("land")
     if st.button("Encerrar Drone"):
-        #cap.release()
-        tello.end_tello()
+        cap.release()
         st.session_state.tello.stop_receiving.set()
         tello.moves_thread.join()
         del st.session_state.tello
         st.stop()
-    
+
     st.write("---")
     st.subheader("Enviar Comando")
     command_input = st.text_input("Digite um comando para o drone:", "")
@@ -75,7 +121,6 @@ with st.sidebar:
         if command_input:
             response = tello.send_cmd_return(command_input)
             st.session_state.command_log.append(f"{command_input} -> {response}")
-            st.write(response)
 
 # Iniciar a busca se ainda não estiver rodando
 if not tello_control.searching:
@@ -84,30 +129,25 @@ if not tello_control.searching:
     search_thread.start()
     tello_control.searching = True
 
-# Loop principal da interface
+# Loop principal
 while True:
-    #ret, frame = cap.read()
-    frame = tello.get_frame()
+    ret, frame = cap.read()
+    #frame = tello.get_frame()
     frame = tello_control.moves(tello, frame)
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame_placeholder.image(frame, channels="RGB")
-    
-    fps = tello.calc_fps()
-    fps_placeholder.text(f"FPS: {fps}")
 
-    # Atualiza informações do drone a cada 5 segundos
+    # Atualiza valores a cada 5 segundos
     if time.time() - st.session_state.last_update >= 5:
+        update_values()
         st.session_state.last_update = time.time()
-        info_placeholder.text(update_info())
 
-    # Pegar logs da variável global e transferir para o session_state
-    if "command_log" not in st.session_state:
-        st.session_state.command_log = []
-    
+    # Atualiza logs
     if tello_control.log_messages:
         st.session_state.command_log.extend(tello_control.log_messages)
         tello_control.log_messages.clear()
-
+    
     log_placeholder.text("\n".join(st.session_state.command_log))
+    st.session_state.fps_value.markdown(f"**{tello.calc_fps()}**")
 
-    time.sleep(0.001)  # Reduz a frequência do loop para evitar sobrecarga
+    time.sleep(0.001)
