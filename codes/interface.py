@@ -8,20 +8,19 @@ from tello_zune import TelloZune
 # Inicialização do Drone
 if "tello" not in st.session_state:
     st.session_state.tello = TelloZune()
-    st.session_state.tello.simulate = True
     st.session_state.command_log = []
     st.session_state.params_initialized = False  # Controle de inicialização
 
 tello = st.session_state.tello
 st.session_state.last_update = time.time()
-tello_control.enable_search = True
+tello_control.enable_search = False
 tello_control.stop_searching.clear()
 
 # Iniciar o drone apenas se ele ainda não estiver conectado
 if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
-    #tello.start_tello()
-    pass
-cap = cv2.VideoCapture(0) # webcam
+    tello.start_tello()
+    #pass
+#cap = cv2.VideoCapture(0) # webcam
 
 # Configuração da Interface
 st.set_page_config(layout="wide")
@@ -108,8 +107,10 @@ with st.sidebar:
         tello.send_cmd("land")
         st.session_state.command_log.append("land")
     if st.button("Encerrar Drone"):
-        cap.release()
+        #cap.release()
+        tello.end_tello()
         st.session_state.tello.stop_receiving.set()
+        tello_control.stop_searching.set()
         tello.moves_thread.join()
         del st.session_state.tello
         st.stop()
@@ -120,7 +121,13 @@ with st.sidebar:
     if st.button("Enviar Comando"):
         if command_input:
             response = tello.send_cmd_return(command_input)
+            time.sleep(0.1)
             st.session_state.command_log.append(f"{command_input} -> {response}")
+
+    st.write("---")
+    st.subheader("Logs")
+    if st.button("Limpar Logs"):
+        st.session_state.command_log.clear()
 
 # Iniciar a busca se ainda não estiver rodando
 if not tello_control.searching:
@@ -131,8 +138,8 @@ if not tello_control.searching:
 
 # Loop principal
 while True:
-    ret, frame = cap.read()
-    #frame = tello.get_frame()
+    #ret, frame = cap.read()
+    frame = tello.get_frame()
     frame = tello_control.moves(tello, frame)
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame_placeholder.image(frame, channels="RGB")
@@ -150,4 +157,4 @@ while True:
     log_placeholder.text("\n".join(st.session_state.command_log))
     st.session_state.fps_value.markdown(f"**{tello.calc_fps()}**")
 
-    time.sleep(0.001)
+    #time.sleep(0.001)
