@@ -5,7 +5,7 @@ from .tracking_base import follow, draw
 from .qr_processing import process
 
 old_move = ''
-pace = ' 70'
+pace = ' 50'
 pace_moves = ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']
 searching = False
 enable_search = False
@@ -51,6 +51,7 @@ def moves(tello: object, frame: object) -> object:
         if not searching:
             stop_searching.clear()                                         # Reseta o evento de parada
             search_thread = threading.Thread(target=search, args=(tello,)) # Cria a thread de busca
+            search_thread.daemon = True                                    # Define como daemon (encerra quando a thread principal encerra)
             search_thread.start()                                          # Inicia a thread
             searching = True
 
@@ -67,10 +68,9 @@ def moves(tello: object, frame: object) -> object:
             logging.info(text)
 
         elif text == 'land' and old_move != 'land':
-            while float(tello.get_state_field('h')) >= 13:
-                tello.send_rc_control(0, 0, -70, 0)
-            tello.send_cmd(str(text))
-            logging.info(f"{text}+' '{response}")
+            tello.land() # Atualizado
+            print(text)
+            logging.info(text)
 
         elif text == 'takeoff' and old_move != 'takeoff':
             tello.send_cmd(text)

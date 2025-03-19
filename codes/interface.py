@@ -24,11 +24,7 @@ if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
 
 # Configuração da Interface
 st.set_page_config(layout="wide")
-
-# Layout Principal
 left_col, right_col = st.columns([3, 1])  # 3:1 proporção entre vídeo e parâmetros
-
-# Placeholders dinâmicos
 frame_placeholder = left_col.empty()
 log_placeholder = st.empty()  # Log abaixo de todo o conteúdo
 
@@ -85,18 +81,6 @@ if not st.session_state.params_initialized:
 
     st.session_state.params_initialized = True
 
-# Função para atualizar valores
-def update_values():
-    """Atualiza os valores dos parâmetros dinamicamente"""
-    bat, height, temph, pres, time_elapsed = tello.get_info()
-    
-    with right_col:
-        st.session_state.battery_value.markdown(f"**{bat if bat is not None else 'N/A'}%**")
-        st.session_state.height_value.markdown(f"**{height if height is not None else 'N/A'} cm**")
-        st.session_state.temp_value.markdown(f"**{temph if temph is not None else 'N/A'}°C**")
-        st.session_state.pres_value.markdown(f"**{pres if pres is not None else 'N/A'}**")
-        st.session_state.time_value.markdown(f"**{time_elapsed if time_elapsed is not None else 'N/A'} s**")
-
 # Sidebar
 with st.sidebar:
     st.header("Controles")
@@ -111,7 +95,7 @@ with st.sidebar:
         tello.end_tello()
         st.session_state.tello.stop_receiving.set()
         tello_control.stop_searching.set()
-        tello.moves_thread.join()
+        st.session_state.tello.moves_thread.join()
         del st.session_state.tello
         st.stop()
 
@@ -136,6 +120,18 @@ if not tello_control.searching:
     search_thread.start()
     tello_control.searching = True
 
+# Função para atualizar valores
+def update_values():
+    """Atualiza os valores dos parâmetros dinamicamente"""
+    bat, height, temph, pres, time_elapsed = tello.get_info()
+    
+    with right_col:
+        st.session_state.battery_value.markdown(f"**{bat if bat is not None else 'N/A'}%**")
+        st.session_state.height_value.markdown(f"**{height if height is not None else 'N/A'} cm**")
+        st.session_state.temp_value.markdown(f"**{temph if temph is not None else 'N/A'}°C**")
+        st.session_state.pres_value.markdown(f"**{pres if pres is not None else 'N/A'}**")
+        st.session_state.time_value.markdown(f"**{time_elapsed if time_elapsed is not None else 'N/A'} s**")
+
 # Loop principal
 while True:
     #ret, frame = cap.read()
@@ -155,6 +151,6 @@ while True:
         tello_control.log_messages.clear()
     
     log_placeholder.text("\n".join(st.session_state.command_log))
-    st.session_state.fps_value.markdown(f"**{tello.calc_fps()}**")
+    st.session_state.fps_value.markdown(f"**{tello.calc_fps()}**") # Atualiza FPS a cada frame
 
     #time.sleep(0.001)
