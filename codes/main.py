@@ -23,10 +23,10 @@ Como executar:
 """
 
 # Inicialização
-cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
+#cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
 tello = TelloZune() # Cria objeto da classe TelloZune
 tello.simulate = False # False: o drone decola; True: simula o voo
-#tello.start_tello() # Inicia a comunicação com o drone
+tello.start_tello() # Inicia a comunicação com o drone
 #tello_control.enable_search = True # Ativa a busca
 timer = time.time()
 bat, height, temph, pres, time_elapsed = tello.get_info()
@@ -34,9 +34,9 @@ bat, height, temph, pres, time_elapsed = tello.get_info()
 try:
     while True:
         # Captura
-        ret, frame = cap.read() # Captura de vídeo da webcam
-        #frame = tello.get_frame()
-        frame = cv2.resize(frame, (960, 720))
+        #ret, frame = cap.read() # Captura de vídeo da webcam
+        frame = tello.get_frame()
+        #frame = cv2.resize(frame, (960, 720))
 
         # Tratamento
         frame = tello_control.moves(tello, frame)
@@ -56,7 +56,7 @@ try:
             break
 finally:
     # Finalização
-    cap.release()
-    #tello.end_tello()
+    #cap.release()
+    tello.end_tello()
     cv2.destroyAllWindows()
     tello.moves_thread.join() # Aguarda a thread de movimentos encerrar
