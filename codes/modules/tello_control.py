@@ -66,17 +66,20 @@ def moves(tello: object, frame: object) -> object:
         if text == 'follow':
             frame = follow(tello, frame, x1, y1, x2, y2, detections, text)
             logging.info(text)
+            log_messages.append(text)
 
         elif text == 'land' and old_move != 'land':
             tello.land() # Atualizado
             print(text)
             logging.info(text)
+            log_messages.append(text)
 
         elif text == 'takeoff' and old_move != 'takeoff':
             tello.send_cmd(text)
             time.sleep(0.1)
             print(text)
-            logging.info(text)
+            #logging.info(text)
+            log_messages.append(text)
 
         elif text in pace_moves:
             frame = draw(frame, x1, y1, x2, y2, text)
@@ -86,7 +89,9 @@ def moves(tello: object, frame: object) -> object:
                 with tello.queue_lock:                               # Bloqueia a fila de comandos
                     tello.command_queue.append(f"{text}{pace}")      # Adiciona o comando à fila
                     #print(command_queue)
+                time.sleep(1)
                 logging.info(f"{text}{pace}, {response}")
+                log_messages.append(f"{text}{pace}, {response}\n")
                 last_command_time[text] = current_time               # Atualiza o tempo do último comando de text
 
     old_move = text
