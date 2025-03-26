@@ -13,6 +13,9 @@ if "tello" not in st.session_state:
     st.session_state.params_initialized = False # Controle de inicialização
     st.session_state.ai_response = ""
 
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
 tello = st.session_state.tello
 st.session_state.last_update = time.time()
 tello_control.enable_search = False # Ativa a busca
@@ -105,11 +108,25 @@ if not st.session_state.params_initialized:
     st.session_state.params_initialized = True
 
 with text_input_placeholder.container():
-    ai_response = st.text_input("Envie um comando para o drone:")
-    if st.button("Enviar Comando"):
-        ai_thread = threading.Thread(target=chatbot.run_ai, args=(ai_response,))
+    user_input = st.text_input("Envie um comando para o drone:", key="user_input")
+    if st.button("Enviar Comando") and user_input:
+        # Adiciona mensagem do usuário ao histórico
+        st.session_state.chat_history.append(("user", user_input))
+        
+        # Inicia thread da IA
+        ai_thread = threading.Thread(
+            target=chatbot.run_ai,
+            args=(user_input, st.session_state.chat_history)
+        )
         ai_thread.start()
-        #ai_response = chatbot.get_last_response()
+
+# Exibe o histórico de conversa
+with response_placeholder.container():
+    for sender, message in st.session_state.chat_history:
+        if sender == "user":
+            st.markdown(f"**Você:** {message}")
+        else:
+            st.markdown(f"**Drone:** {message}")
 
 # Sidebar
 with st.sidebar:
@@ -144,7 +161,7 @@ if not tello_control.searching and tello_control.enable_search:
     tello_control.searching = True
 
 # Loop principal
-while True:
+while cap.isOpened():
     # Atualizar valores
     if time.time() - st.session_state.last_update >= 1:
         update_values()
@@ -154,7 +171,12 @@ while True:
     log_placeholder.markdown("\n".join(st.session_state.command_log))
 
     # Atualizar resposta da IA
-    response_placeholder.markdown(chatbot.get_last_response())
+    with response_placeholder.container():
+        for sender, message in st.session_state.chat_history:
+            if sender == "user":
+                st.markdown(f"**Você:** {message}")
+            else:
+                st.markdown(f"**Drone:** {message}")
 
     # Atualizar frame
     ret, frame = cap.read()
