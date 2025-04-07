@@ -2,6 +2,7 @@ import streamlit as st
 import time
 import cv2
 import threading
+from datetime import datetime
 import modules.tello_control as tello_control
 import modules.chatbot as chatbot
 from tello_zune import TelloZune
@@ -11,7 +12,6 @@ if "tello" not in st.session_state:
     st.session_state.tello = TelloZune()
     st.session_state.command_log = []
     st.session_state.params_initialized = False # Controle de inicialização
-    st.session_state.ai_response = ""
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -20,6 +20,7 @@ tello = st.session_state.tello
 st.session_state.last_update = time.time()
 tello_control.enable_search = False # Ativa a busca
 tello_control.stop_searching.clear()
+#tello.simulate = True # Modo simulação
 
 # Configuração da Interface
 st.set_page_config(layout="wide")
@@ -30,11 +31,15 @@ response_placeholder = st.empty()
 
 # Iniciar o drone apenas se ele ainda não estiver conectado
 if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
-    #tello.start_tello()
-    pass
-if "cap" not in st.session_state:
-    st.session_state.cap = cv2.VideoCapture(0) # webcam
-cap = st.session_state.cap
+    tello.start_tello()
+    #pass
+#if "cap" not in st.session_state:
+#    st.session_state.cap = cv2.VideoCapture(0) # webcam
+#cap = st.session_state.cap
+
+VALID_COMMANDS = [
+    'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
+]
 
 # Funções auxiliares
 def update_pace():
@@ -53,6 +58,22 @@ def update_values():
         st.session_state.temp_value.markdown(f"**{temph if temph is not None else 'N/A'}°C**")
         st.session_state.pres_value.markdown(f"**{pres if pres is not None else 'N/A'}hPa**")
         st.session_state.time_value.markdown(f"**{time_elapsed if time_elapsed is not None else 'N/A'}s**")
+
+def validate_command(cmd: str) -> bool:
+    parts = cmd.strip().split()
+    if not parts:
+        return False
+
+    base_cmd = parts[0].lower()
+
+    if base_cmd not in VALID_COMMANDS:
+        return False
+
+    if base_cmd in ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']:
+        if len(parts) != 2 or not parts[1].isdigit():
+            return False
+
+    return True
 
 # Inicialização dos elementos da coluna direita
 if not st.session_state.params_initialized:
@@ -109,24 +130,33 @@ if not st.session_state.params_initialized:
 
 with text_input_placeholder.container():
     user_input = st.text_input("Envie um comando para o drone:", key="user_input")
-    if st.button("Enviar Comando") and user_input:
-        # Adiciona mensagem do usuário ao histórico
-        st.session_state.chat_history.append(("user", user_input))
-        
-        # Inicia thread da IA
-        ai_thread = threading.Thread(
-            target=chatbot.run_ai,
-            args=(user_input, st.session_state.chat_history)
-        )
-        ai_thread.start()
+    
+    chat_history_lock = threading.Lock()
+    shared_chat_history = st.session_state.chat_history.copy()
 
-# Exibe o histórico de conversa
-with response_placeholder.container():
-    for sender, message in st.session_state.chat_history:
-        if sender == "user":
-            st.markdown(f"**Você:** {message}")
-        else:
-            st.markdown(f"**Drone:** {message}")
+    if st.button("Enviar") and user_input:
+        #ret, frame = cap.read()
+        frame = tello.get_frame()
+        current_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        natural_response, command = chatbot.generate_drone_command(user_input, current_frame)
+        tello_control.log_messages.append(command)
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        entry = {
+            "user": user_input,
+            "ai": natural_response,
+            "command": command,
+            "timestamp": timestamp,
+            "status": "queued" if command else "error"
+        }
+
+        if command and validate_command(command):
+            print(f"Comando validado: {command}")
+            tello_control.process_ai_command(tello, command)
+            entry["execution"] = f"Comando enfileirado: {command}"
+
+        with chat_history_lock:
+            st.session_state.chat_history.append(entry)
 
 # Sidebar
 with st.sidebar:
@@ -138,8 +168,8 @@ with st.sidebar:
         tello.send_cmd("land")
         st.session_state.command_log.append("land")
     if st.button("Encerrar Drone"):
-        cap.release()
-        #tello.end_tello()
+        #cap.release()
+        tello.end_tello()
         tello.stop_receiving.set()
         tello_control.stop_searching.set()
         tello.moves_thread.join()
@@ -151,7 +181,9 @@ with st.sidebar:
     st.subheader("Log")
     if st.button("Limpar Logs"):
         st.session_state.command_log.clear()
-    log_placeholder = st.empty()
+    if st.session_state.command_log:
+        for log in st.session_state.command_log:
+            st.text(log)
 
 # Iniciar a busca se ainda não estiver rodando
 if not tello_control.searching and tello_control.enable_search:
@@ -161,27 +193,30 @@ if not tello_control.searching and tello_control.enable_search:
     tello_control.searching = True
 
 # Loop principal
-while cap.isOpened():
+while not tello.stop_receiving.is_set():
     # Atualizar valores
-    if time.time() - st.session_state.last_update >= 1:
+    if time.time() - st.session_state.last_update >= 3:
         update_values()
         st.session_state.last_update = time.time()
 
-    # Atualizar logs
-    log_placeholder.markdown("\n".join(st.session_state.command_log))
-
     # Atualizar resposta da IA
     with response_placeholder.container():
-        for sender, message in st.session_state.chat_history:
-            if sender == "user":
-                st.markdown(f"**Você:** {message}")
+        for entry in st.session_state.chat_history:
+            # Mensagem do usuário
+            st.markdown(f"**{entry['timestamp']} - Você:** {entry['user']}")
+            
+            # Resposta do drone com tratamento de status
+            if entry['status'] == 'processing':
+                with st.spinner(entry['ai']):
+                    time.sleep(0.1)  # Mantém o spinner animado
             else:
-                st.markdown(f"**Drone:** {message}")
+                st.markdown(f"**{entry['timestamp']} - Drone:** {entry['ai']}")
 
     # Atualizar frame
-    ret, frame = cap.read()
-    if not ret:
-        break
+    frame = tello.get_frame()
+    #ret, frame = cap.read()
+    #if not ret:
+    #    break
     #frame = tello.get_frame()
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB) # Conversão agora é feita aqui
     frame = tello_control.moves(tello, frame)
