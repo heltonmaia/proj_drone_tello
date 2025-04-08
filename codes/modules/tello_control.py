@@ -6,7 +6,7 @@ from .qr_processing import process
 old_move = ''
 pace = ' 50'
 VALID_COMMANDS = [
-    'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
+    'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
 ]
 searching = False
 enable_search = False
@@ -36,18 +36,28 @@ def search(tello: object):
         #print((time.time() - timer).__round__(2)) # Ver contagem regressiva
 
 def _add_command(tello: object, command: str):
-    """Adiciona comandos à fila de comandos do drone, função interna"""
+    """
+    Adiciona comandos à fila de comandos do drone, função interna
+    Args:
+        tello (object): Objeto da classe TelloZune, que possui métodos para enviar comandos e obter estado.
+        command (str): Comando a ser adicionado à fila.
+    """
     try:
         with tello.queue_lock:
             tello.command_queue.append(command)
-            print(f"Comando enfileirado: {command}")  # Debug
-            log_messages.append(command)
+            print(f"Comando enfileirado: {command}")
+            #log_messages.append(command)
     except Exception as e:
         print(f"Erro ao adicionar comando: {str(e)}")
 
 def process_ai_command(tello: object, command: str):
-    """Processa comandos da IA"""
-    base_cmd = command.split()[0] if ' ' in command else command
+    """
+    Processa comandos da IA
+    Args:
+        tello (object): Objeto da classe TelloZune, que possui métodos para enviar comandos e obter estado.
+        command (str): Comando a ser processado.
+    """
+    base_cmd = command.split()[0] if ' ' in command else command # Caso tenha espaço, pega apenas o comando
 
     if base_cmd in VALID_COMMANDS:
         _add_command(tello, command)
@@ -56,7 +66,14 @@ def process_ai_command(tello: object, command: str):
         _add_command(tello, command)
 
 def moves(tello: object, frame: object) -> object:
-    """Executa movimentos do drone"""
+    """
+    Executa movimentos do drone
+    Args:
+        tello (object): Objeto da classe TelloZune, que possui métodos para enviar comandos e obter estado.
+        frame (object): Frame atual da câmera.
+    Returns:
+        object: Frame atualizado.
+    """
     global old_move, pace, searching, stop_searching
 
     frame, x1, y1, x2, y2, detections, text = process(frame)
@@ -77,11 +94,15 @@ def moves(tello: object, frame: object) -> object:
         if text == 'follow':
             frame = follow(tello, frame, x1, y1, x2, y2, detections, text)
         elif text in ['land', 'takeoff']:
+            frame = draw(frame, x1, y1, x2, y2, text)
             _add_command(tello, text)
             log_messages.append(text)
-        elif text in VALID_COMMANDS:
+        current_time = time.time()
+        if text in VALID_COMMANDS[2:] and (old_move != text and (current_time - last_command_time.get(text, 0) > 7)):
             frame = draw(frame, x1, y1, x2, y2, text)
             _add_command(tello, text + pace)
             log_messages.append(text + pace)
+            last_command_time[text] = current_time
+
     old_move = text
     return frame

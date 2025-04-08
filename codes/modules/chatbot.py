@@ -2,7 +2,6 @@ import google.generativeai as genai
 from PIL import Image
 import streamlit as st
 from modules import utils
-import threading
 
 utils.configureGenerativeAI()
 model = genai.GenerativeModel('gemini-1.5-flash')
@@ -11,45 +10,27 @@ COMMAND_LIST = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
 ]
 
-def run_ai(prompt: str, frame, timestamp: str, chat_history: list, lock: threading.Lock):
-    try:
-        pil_image = Image.fromarray(frame)
-        response = model.generate_content([prompt, pil_image])
-
-        # Atualiza histórico de forma segura
-        with lock:
-            for entry in chat_history:
-                if entry["timestamp"] == timestamp and entry["status"] == "processing":
-                    entry["ai"] = response.text
-                    entry["status"] = "completed"
-                    break
-
-    except Exception as e:
-        with lock:
-            for entry in chat_history:
-                if entry["timestamp"] == timestamp and entry["status"] == "processing":
-                    entry["ai"] = f"Erro1: {str(e)}"
-                    entry["status"] = "error"
-                    break
-
-    except Exception as e:
-        update_chat_history(
-            response=f"Erro2: {str(e)}",
-            timestamp=timestamp
-        )
-
 def update_chat_history(response: str, timestamp: str):
-    """Atualiza o histórico de forma thread-safe"""
+    """
+    Atualiza o histórico de forma thread-safe
+    Args:
+        response (str): Resposta da IA.
+        timestamp (str): Timestamp da mensagem.
+    """
     for entry in st.session_state.chat_history:
         if entry["timestamp"] == timestamp and entry["status"] == "processing":
             entry["ai"] = response
             entry["status"] = "completed"
             break
 
-def generate_drone_command(prompt: str, frame) -> tuple:
+def run_ai(prompt: str, frame) -> tuple:
     """
-    Retorna:
-    tuple: (resposta natural, comando técnico)
+    Executa a IA para gerar comandos de controle do drone.
+    Args:
+        prompt (str): Descrição do que o drone deve fazer.
+        frame (object): Frame da câmera atual.
+    Returns:
+        tuple: (resposta natural, comando técnico)
     """
     try:
         response = model.generate_content([
@@ -74,7 +55,8 @@ def generate_drone_command(prompt: str, frame) -> tuple:
             [DECISÃO] Comando técnico (ex: 'forward 50')
             [JUSTIFICATIVA] Explicação da ação
 
-            Os comandos de movimentos precisam necessariamente de um passo em cm, land e takeoff não precisam de passo
+            Os comandos de movimentos precisam necessariamente de um passo em cm, land e takeoff não precisam de passo.
+            Caso não seja necessário nenhum movimento, retorne apenas a análise.
             """,
             Image.fromarray(frame)
         ])
@@ -97,3 +79,26 @@ def generate_drone_command(prompt: str, frame) -> tuple:
 
     except Exception as e:
         return f"Erro3: {str(e)}", None
+    
+def validate_command(cmd: str) -> bool:
+    """
+    Valida o comando recebido
+    Args:
+        cmd (str): Comando recebido
+    Returns:
+        bool: True se o comando for válido, False caso contrário
+    """
+    parts = cmd.strip().split()
+    if not parts:
+        return False
+
+    base_cmd = parts[0].lower()
+
+    if base_cmd not in COMMAND_LIST:
+        return False
+
+    if base_cmd in ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']:
+        if len(parts) != 2 or not parts[1].isdigit():
+            return False
+
+    return True

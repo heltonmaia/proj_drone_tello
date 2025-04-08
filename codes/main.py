@@ -37,10 +37,6 @@ if not hasattr(tello, "receiverThread") or not tello.receiverThread.is_alive():
 #    st.session_state.cap = cv2.VideoCapture(0) # webcam
 #cap = st.session_state.cap
 
-VALID_COMMANDS = [
-    'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
-]
-
 # Funções auxiliares
 def update_pace():
     """Atualiza o valor de tello_control.pace"""
@@ -51,6 +47,7 @@ def update_pace():
 def update_values():
     """Atualiza os valores dos parâmetros dinamicamente"""
     bat, height, temph, pres, time_elapsed = tello.get_info()
+    #bat, height, temph, pres, time_elapsed = 80, 100, 25, 1013, 60 # Simulação
     
     with right_col:
         st.session_state.battery_value.markdown(f"**{bat if bat is not None else 'N/A'}%**")
@@ -58,22 +55,6 @@ def update_values():
         st.session_state.temp_value.markdown(f"**{temph if temph is not None else 'N/A'}°C**")
         st.session_state.pres_value.markdown(f"**{pres if pres is not None else 'N/A'}hPa**")
         st.session_state.time_value.markdown(f"**{time_elapsed if time_elapsed is not None else 'N/A'}s**")
-
-def validate_command(cmd: str) -> bool:
-    parts = cmd.strip().split()
-    if not parts:
-        return False
-
-    base_cmd = parts[0].lower()
-
-    if base_cmd not in VALID_COMMANDS:
-        return False
-
-    if base_cmd in ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']:
-        if len(parts) != 2 or not parts[1].isdigit():
-            return False
-
-    return True
 
 # Inicialização dos elementos da coluna direita
 if not st.session_state.params_initialized:
@@ -138,11 +119,11 @@ with text_input_placeholder.container():
         #ret, frame = cap.read()
         frame = tello.get_frame()
         current_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        natural_response, command = chatbot.generate_drone_command(user_input, current_frame)
+        natural_response, command = chatbot.run_ai(user_input, current_frame)
         tello_control.log_messages.append(command)
 
         timestamp = datetime.now().strftime("%H:%M:%S")
-        entry = {
+        entry = { # Dicionário para armazenar a mensagem
             "user": user_input,
             "ai": natural_response,
             "command": command,
@@ -150,9 +131,10 @@ with text_input_placeholder.container():
             "status": "queued" if command else "error"
         }
 
-        if command and validate_command(command):
+        if command and chatbot.validate_command(command):
             print(f"Comando validado: {command}")
             tello_control.process_ai_command(tello, command)
+            st.session_state.command_log.append(command)
             entry["execution"] = f"Comando enfileirado: {command}"
 
         with chat_history_lock:
@@ -181,8 +163,9 @@ with st.sidebar:
     st.subheader("Log")
     if st.button("Limpar Logs"):
         st.session_state.command_log.clear()
+    logs = st.session_state.command_log #+ tello_control.log_messages
     if st.session_state.command_log:
-        for log in st.session_state.command_log:
+        for log in logs:
             st.text(log)
 
 # Iniciar a busca se ainda não estiver rodando
@@ -195,7 +178,7 @@ if not tello_control.searching and tello_control.enable_search:
 # Loop principal
 while not tello.stop_receiving.is_set():
     # Atualizar valores
-    if time.time() - st.session_state.last_update >= 3:
+    if time.time() - st.session_state.last_update >= 5:
         update_values()
         st.session_state.last_update = time.time()
 
@@ -211,6 +194,7 @@ while not tello.stop_receiving.is_set():
                     time.sleep(0.1)  # Mantém o spinner animado
             else:
                 st.markdown(f"**{entry['timestamp']} - Drone:** {entry['ai']}")
+                st.write("\n")
 
     # Atualizar frame
     frame = tello.get_frame()
@@ -223,5 +207,4 @@ while not tello.stop_receiving.is_set():
     frame_placeholder.image(frame, channels="RGB")
     
     # Atualizar FPS
-    st.session_state.fps_value.markdown(f"**{int(1 / (time.time() - st.session_state.last_update))} FPS**")
-    st.session_state.last_update = time.time()
+    st.session_state.fps_value.markdown(f"**{tello.calc_fps()} FPS**")
