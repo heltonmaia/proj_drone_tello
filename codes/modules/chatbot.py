@@ -2,8 +2,9 @@ import google.generativeai as genai
 from PIL import Image
 import streamlit as st
 from modules import utils
+import threading
 
-utils.configureGenerativeAI()
+utils.configure_generative_ai()
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 COMMAND_LIST = [
@@ -12,18 +13,18 @@ COMMAND_LIST = [
 
 def update_chat_history(response: str, timestamp: str):
     """
-    Atualiza o histórico de forma thread-safe
+    Atualiza o histórico de forma thread-safe.
     Args:
         response (str): Resposta da IA.
         timestamp (str): Timestamp da mensagem.
     """
     for entry in st.session_state.chat_history:
         if entry["timestamp"] == timestamp and entry["status"] == "processing":
-            entry["ai"] = response
-            entry["status"] = "completed"
+            entry["ai"] = response # Atualiza a resposta da IA
+            entry["status"] = "completed" # Atualiza o status para completo
             break
 
-def run_ai(prompt: str, frame) -> tuple:
+def run_ai(prompt: str, frame: object) -> tuple:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:

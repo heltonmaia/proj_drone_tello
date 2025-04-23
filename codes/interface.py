@@ -130,7 +130,7 @@ def render_response(response_placeholder) -> None:
         for entry in st.session_state.chat_history[-3:]: # Testar se exibe os últimos 3 comandos
             st.markdown(f"**{entry['timestamp']} - Você:** {entry['user']}")
             if entry['status'] == 'processing':
-                with st.spinner(entry['ai']):
+                with st.spinner(entry['ai'], show_time=True):
                     time.sleep(0.1)
             else:
                 st.markdown(f"**{entry['timestamp']} - Drone:** {entry['ai']}")

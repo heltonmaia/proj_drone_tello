@@ -10,7 +10,7 @@ def main():
     tello_control.stop_searching.clear()
     tello_control.searching = False
 
-    if not hasattr(st.session_state.tello, "receiverThread") or not st.session_state.tello.receiverThread.is_alive():
+    if not hasattr(st.session_state.tello, "receiverThread"): #or not st.session_state.tello.receiverThread.is_alive():
         st.session_state.tello.start_tello()
         #pass #webcam
 
