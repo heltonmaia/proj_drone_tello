@@ -25,13 +25,13 @@ def search(tello: object):
     i = 0
     commands = ['ccw 20', 'cw 50']
     while not stop_searching.is_set() and not tello.stop_receiving.is_set() and enable_search:
-        if time.time() - timer >= 10:                # 10 segundos
+        if time.time() - timer >= 10:               # 10 segundos
             tello.add_command(commands[i])          # Rotaciona
-            time.sleep(0.1)                          # Testar se resposta é exibida
+            time.sleep(0.1)                         # Testar se resposta é exibida
             print(f"{commands[i]}, {response}")
             log_messages.append(f"{commands[i]}, {response}\n")
             timer = time.time()
-            i = (i + 1) % 2                          # Alterna entre 0 e 1
+            i = (i + 1) % 2                         # Alterna entre 0 e 1
             time.sleep(0.01)
         #print((time.time() - timer).__round__(2)) # Ver contagem regressiva
 
@@ -44,7 +44,7 @@ def process_ai_command(tello: object, command: str):
      """
      base_cmd = command.split()[0] if ' ' in command else command # Caso tenha espaço, pega apenas o comando
      if base_cmd in VALID_COMMANDS:
-         tello.add_command(command)
+        tello.add_command(command)
 
 def moves(tello: object, frame: object) -> object:
     """

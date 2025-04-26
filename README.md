@@ -5,85 +5,73 @@
 - Murilo de Lima Barros (aluno)
 
 ## **Descrição do Projeto**  
-Este projeto tem como objetivo desenvolver um sistema de logística autônoma em ambientes fechados utilizando drones DJI Tello equipados com câmeras para identificar e navegar até QR codes. A proposta visa otimizar tarefas como transporte de pequenos itens, monitoramento e inventário em locais como escritórios, galpões e hospitais, oferecendo uma solução eficiente, flexível e de baixo custo.  
+Este projeto desenvolve um sistema de logística autônoma em ambientes fechados utilizando drones DJI Tello equipados com câmeras para identificar e navegar até QR codes. Nossa solução busca otimizar tarefas de transporte de pequenos itens, monitoramento e inventário em escritórios, galpões e hospitais, oferecendo eficiência, flexibilidade e baixo custo.
 
-## **Principais Funcionalidades em Desenvolvimento:**  
-- **Detecção de QR Codes:**  
-   - Uso de algoritmos de visão computacional com OpenCV para identificar QR codes em tempo real e extrair informações relevantes.  
-- **Navegação Autônoma:**  
-   - Controle do drone para deslocamento preciso até o QR code identificado, incluindo desvio de obstáculos.  
-- **Gestão de Rotas:**  
-   - Otimização das trajetórias para múltiplos pontos de entrega ou coleta.  
+## **Novas Funcionalidades de Chatbot e Controle**
+- **Chatbot Integrado:** permite interação natural (texto) com o sistema via interface Streamlit. O usuário digita comandos livres, o chatbot interpreta e gera o comando DJI Tello correspondente.
+- **Processamento de Comandos:** uso de `process_ai_command` para validar e enfileirar instruções recebidas do chatbot, com feedback em tempo real no histórico de chat.
+- **Interface Streamlit:** painel web para:
+  - Visualizar vídeo ao vivo do drone
+  - Enviar comandos manuais e via chatbot
+  - Exibir parâmetros de voo (bateria, altura, pressão, temperatura, tempo e FPS)
+  - Logs de comandos e chat
 
-## **Ferramentas Utilizadas:**  
-- **Hardware:** Drone DJI Tello.  
-- **Software:** Python, OpenCV, PyTello SDK.  
-- **Algoritmos:** Detecção de QR codes, planejamento de trajetórias e controle autônomo.  
+## **Principais Funcionalidades em Desenvolvimento**
+- **Detecção de QR Codes:** OpenCV + PyZbar para leitura em tempo real.
+- **Navegação Autônoma:** deslocamento preciso até o QR code, desvio de obstáculos.
+- **Chatbot-AI:** interpretação de linguagem natural para comandos do drone (por ex. “siga”, “pouse quando chegar”, “voe 50 cm para frente”).
+- **Gestão de Rotas:** otimização multi-ponto de entrega/coleta.
 
-## **Status Atual:**  
-- Desenvolvimento inicial do algoritmo de navegação baseado em visão computacional.  
-- Testes em cenários controlados, simulando transporte de pequenos objetos. 
-- Melhoria do desempenho. 
+## **Ferramentas Utilizadas**
+- **Hardware:** Drone DJI Tello
+- **Software:** Python, OpenCV, PyTello SDK, PyZbar, Streamlit
+- **IA & NLP:** Chatbot baseado em modelo de linguagem (OpenAI GPT/Gemini)
 
-## **Próximos Passos:**  
-- Melhorar a precisão da navegação autônoma.  
-- Integrar um sistema de gerenciamento de múltiplas rotas.  
-- Realizar testes extensivos em ambientes reais, como escritórios e pequenos armazéns.  
+## **Status Atual**
+- Streaming de vídeo e telemetria funcionando
+- Integração do chatbot e fila de comandos validada
+- Movimentação básica e follow via QR code implementados
 
-O projeto busca transformar processos logísticos internos, promovendo eficiência, automação e acessibilidade. Além disso, oferece uma oportunidade de aprendizado prático em áreas como visão computacional, robótica e inteligência artificial.  
-
-Este projeto está em constante evolução. Qualquer contribuição ou feedback será muito bem-vindo!
-
-## **Utilização:**
-### Instalação
-
+## **Instalação**
 ```bash
 # Clone o repositório
-git clone https://github.com/heltonmaia/proj_drone_tello
-```
+git clone https://github.com/heltonmaia/proj_drone_tello.git
+cd proj_drone_tello
 
-```bash
-# Instalar dependências
-pip install opencv-python
-pip install pyzbar
-pip install tello_zune
-pip install streamlit
-```
+# Crie ambiente virtual (opcional)
+python -m venv venv
+source venv/bin/activate
 
-### Funcionamento
-O algoritmo detecta QR codes, envia comandos ao drone via Wi-Fi e processa os dados recebidos. Para usar, conecte-se à rede WI-FI do drone. Um local bem iluminado é essencial para imagens nítidas.
+# Instale dependências
+pip install -r requirements.txt
+```  
+> *requirements.txt* deve incluir: `opencv-python`, `pyzbar`, `tello-zune`, `streamlit`, `openai` (ou biblioteca IA usada).
 
-#### Local
-Para visualizar os dados do drone em sua máquina execute o módulo main.py
+## **Uso**
+1. **Conecte-se** à rede Wi‑Fi do drone DJI Tello.
+2. **Execute** a interface Streamlit:
+   ```bash
+   streamlit run main.py
+   ```
+3. **Na UI**:
+   - Visualize o vídeo ao vivo.
+   - Digite um comando manual ou conversacional na caixa de texto.
+   - Veja o histórico de chat e logs de comandos.
+   - Ajuste o passo (cm) para movimentos com QR code.
+   - Clique em Decolar, Pousar ou Encerrar Drone.
 
-#### Interface Web
-Para utilizar a interface execute o comando:
-```bash
-# Em proj_drone_tello/codes/
-streamlit run interface.py
-```
+## **Comandos Válidos via Chatbot**
+| Comando (palavras livres)      | Ação DJI Tello                      |
+|--------------------------------|-------------------------------------|
+| “decolar”                      | `takeoff`                           |
+| “pousar”                       | `land`                              |
+| “suba 30cm”                    | `up 30`                             |
+| “desça 20cm”                   | `down 20`                           |
+| “vá para frente 50”            | `forward 50`                        |
+| “move para a direita 20”       | `right 20`                          |
 
-Comandos como "down 20" executam movimentos com o passo definido pelo usuário. Sem detecção por um tempo pré-configurado, o drone rotaciona para buscar códigos. Com o comando "follow", ajusta sua posição conforme as coordenadas detectadas.
 
-#### Exemplos de comandos válidos:
-
-| Comando         | Descrição                    |
-|-----------------|------------------------------|
-| `takeoff`       | Decolar                      |
-| `land`          | Pousar                       |
-| `up x`          | Subir x cm                   |
-| `down x`        | Descer x cm                  |
-| `right x`       | Mover-se à direita x cm      |
-| `left x`        | Mover-se à esquerda x cm     |
-| `forward x`     | Mover-se para frente x cm    |
-| `back x`        | Mover-se para trás x cm      |
-| `follow`        | Seguir                       |
-
----
-
-Exemplo de funcionamento
-
-![vídeo](video.gif)
-
+## **Exemplo de Uso**
+![Demonstração](video.gif)
 
 

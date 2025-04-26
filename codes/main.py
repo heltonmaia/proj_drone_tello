@@ -4,44 +4,42 @@ import streamlit as st
 import modules.tello_control as tello_control
 import interface
 
-def main():
-    interface.initialize_session()
-    tello_control.enable_search = False
-    tello_control.stop_searching.clear()
-    tello_control.searching = False
+interface.initialize_session()
+tello_control.enable_search = False
+tello_control.stop_searching.clear()
+tello_control.searching = False
 
-    if not hasattr(st.session_state.tello, "receiverThread"): #or not st.session_state.tello.receiverThread.is_alive():
-        st.session_state.tello.start_tello()
-        #pass #webcam
+if not hasattr(st.session_state.tello, "receiverThread") or not st.session_state.tello.receiverThread.is_alive():
+    print("Iniciando o drone...")
+    st.session_state.tello.start_tello()
+    #pass #webcam
 
-    left_col, right_col, frame_placeholder, text_input_placeholder, response_placeholder = interface.configure_interface()
+left_col, right_col, frame_placeholder, text_input_placeholder, response_placeholder = interface.configure_interface()
 
-    interface.render_parameters(right_col)
-    interface.render_sidebar()
-    interface.render_text_input(text_input_placeholder)
+interface.render_parameters(right_col)
+interface.render_sidebar()
+interface.render_text_input(text_input_placeholder)
 
-    if not tello_control.searching and tello_control.enable_search: # Inicia a busca, caso enable_search esteja ativo
-        search_thread = threading.Thread(
-            target=tello_control.search,
-            args=(st.session_state.tello,),
-            daemon=True
-        )
-        search_thread.start()
-        tello_control.searching = True
+if not tello_control.searching and tello_control.enable_search: # Inicia a busca, caso enable_search esteja ativo
+    search_thread = threading.Thread(
+        target=tello_control.search,
+        args=(st.session_state.tello,),
+        daemon=True
+    )
+    search_thread.start()
+    tello_control.searching = True
 
-    while True: # Loop principal
-        if time.time() - st.session_state.last_update >= 5: # Atualiza a cada 5 segundos
-            interface.update_interface_values()
-            st.session_state.last_update = time.time()
+while True: # Loop principal
+    if time.time() - st.session_state.last_update >= 5: # Atualiza a cada 5 segundos
+        interface.update_interface_values()
+        st.session_state.last_update = time.time()
 
-        interface.render_response(response_placeholder) # Atualiza resposta
+    interface.render_response(response_placeholder) # Atualiza resposta
 
-        interface.render_frame(frame_placeholder) # Atualiza frame
+    interface.render_frame(frame_placeholder) # Atualiza frame
 
-        st.session_state.fps_value.markdown(f"**{st.session_state.tello.calc_fps()} FPS**") # Atualiza FPS
+    st.session_state.fps_value.markdown(f"**{st.session_state.tello.calc_fps()} FPS**") # Atualiza FPS
 
-        # Pequena pausa para evitar uso excessivo de CPU
-        #time.sleep(0.01)
+    # Pequena pausa para evitar uso excessivo de CPU
+    #time.sleep(0.01)
 
-if __name__ == '__main__':
-    main()
