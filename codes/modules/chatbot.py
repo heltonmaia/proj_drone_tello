@@ -1,8 +1,7 @@
 import google.generativeai as genai
 from PIL import Image
-import streamlit as st
 from modules import utils
-import threading
+from modules.tello_control import log_messages
 
 utils.configure_generative_ai()
 model = genai.GenerativeModel('gemini-1.5-flash')
@@ -10,19 +9,6 @@ model = genai.GenerativeModel('gemini-1.5-flash')
 COMMAND_LIST = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
 ]
-
-def update_chat_history(response: str, timestamp: str):
-    """
-    Atualiza o histórico de forma thread-safe.
-    Args:
-        response (str): Resposta da IA.
-        timestamp (str): Timestamp da mensagem.
-    """
-    for entry in st.session_state.chat_history:
-        if entry["timestamp"] == timestamp and entry["status"] == "processing":
-            entry["ai"] = response # Atualiza a resposta da IA
-            entry["status"] = "completed" # Atualiza o status para completo
-            break
 
 def run_ai(prompt: str, frame: object) -> tuple:
     """
@@ -42,6 +28,7 @@ def run_ai(prompt: str, frame: object) -> tuple:
             - Você é um controlador de drone autônomo
             - Objetivo: {prompt}
             - Comandos disponíveis: {COMMAND_LIST}
+            - Comandos já enviados: {log_messages}
             - Unidades: centímetros para movimentos e graus para rotações
             
             Instruções:
