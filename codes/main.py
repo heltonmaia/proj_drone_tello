@@ -1,62 +1,45 @@
-import cv2
-from tello_zune import TelloZune
-import modules.tello_control as tello_control
 import time
-"""
-Módulo principal para controle do drone Tello.
-Este arquivo inicializa a captura de vídeo, faz as configurações iniciais e direciona o fluxo de controle do drone.
+import threading
+import streamlit as st
+import modules.tello_control as tello_control
+import interface
 
-Funcionalidades principais:
-- Captura e exibição de vídeo em tempo real.
-- Processamento de QR codes para controle do drone.
-- Decolagem, pouso, busca e movimentação com base nos comandos recebidos.
-- Registro de todos os comandos enviados ao drone em um arquivo de log.
+interface.initialize_session()
+tello_control.enable_search = False
+tello_control.stop_searching.clear()
+tello_control.searching = False
 
-Módulos utilizados:
-- tello_control: Contém funções para movimentação e lógica de controle.
-- tracking_base: Funções para detectar e seguir QR codes.
-- qr_processing: Processamento de QR codes.
-- utils: Configuração de logging.
+if not hasattr(st.session_state.tello, "receiverThread") or not st.session_state.tello.receiverThread.is_alive():
+    print("Iniciando o drone...")
+    st.session_state.tello.start_tello()
+    #pass #webcam
 
-Como executar:
-- Execute o arquivo main.py já conectado à rede Wi-Fi do drone Tello.
-"""
+left_col, right_col, frame_placeholder, text_input_placeholder, response_placeholder = interface.configure_interface()
 
-# Inicialização
-#cap = cv2.VideoCapture(0) # Captura de vídeo da webcam
-tello = TelloZune() # Cria objeto da classe TelloZune
-tello.simulate = False # False: o drone decola; True: simula o voo
-tello.start_tello() # Inicia a comunicação com o drone
-#tello_control.enable_search = True # Ativa a busca
-timer = time.time()
-bat, height, temph, pres, time_elapsed = tello.get_info()
+interface.render_parameters(right_col)
+interface.render_sidebar()
+interface.render_text_input(text_input_placeholder)
 
-try:
-    while True:
-        # Captura
-        #ret, frame = cap.read() # Captura de vídeo da webcam
-        frame = tello.get_frame()
-        #frame = cv2.resize(frame, (960, 720))
+if not tello_control.searching and tello_control.enable_search: # Inicia a busca, caso enable_search esteja ativo
+    search_thread = threading.Thread(
+        target=tello_control.search,
+        args=(st.session_state.tello,),
+        daemon=True
+    )
+    search_thread.start()
+    tello_control.searching = True
 
-        # Tratamento
-        frame = tello_control.moves(tello, frame)
-        fps = tello.calc_fps()
-        tello.write_info(frame, True, True, True, True, True, True)
+while True: # Loop principal
+    if time.time() - st.session_state.last_update >= 5: # Atualiza a cada 5 segundos
+        interface.update_interface_values()
+        st.session_state.last_update = time.time()
 
-        # Atualização
-        if time.time() - timer > 10:
-            timer = time.time()
-            bat, height, temph, pres, time_elapsed = tello.get_info()
+    interface.render_response(response_placeholder) # Atualiza resposta
 
-        # Exibição
-        cv2.imshow('QR Code', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            tello.stop_receiving.set()
-            tello_control.stop_searching.set()
-            break
-finally:
-    # Finalização
-    #cap.release()
-    tello.end_tello()
-    cv2.destroyAllWindows()
-    tello.moves_thread.join() # Aguarda a thread de movimentos encerrar
+    interface.render_frame(frame_placeholder) # Atualiza frame
+
+    st.session_state.fps_value.markdown(f"**{st.session_state.tello.calc_fps()} FPS**") # Atualiza FPS
+
+    # Pequena pausa para evitar uso excessivo de CPU
+    #time.sleep(0.01)
+
