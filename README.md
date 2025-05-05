@@ -35,15 +35,11 @@ Este projeto desenvolve um sistema de logística autônoma em ambientes fechados
 # Clone o repositório
 git clone https://github.com/heltonmaia/proj_drone_tello.git
 cd proj_drone_tello
-
-# Crie ambiente virtual (opcional)
-python -m venv venv
-source venv/bin/activate
-
+```
+```bash
 # Instale dependências
 pip install -r requirements.txt
 ```  
-> *requirements.txt* deve incluir: `opencv-python`, `pyzbar`, `tello-zune`, `streamlit`, `openai` (ou biblioteca IA usada).
 
 ## **Uso**
 1. **Conecte-se** à rede Wi‑Fi do drone DJI Tello.
