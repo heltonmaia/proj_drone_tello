@@ -20,15 +20,6 @@ interface.render_parameters(right_col)
 interface.render_sidebar()
 interface.render_text_input(text_input_placeholder)
 
-if not tello_control.searching and tello_control.enable_search: # Inicia a busca, caso enable_search esteja ativo
-    search_thread = threading.Thread(
-        target=tello_control.search,
-        args=(st.session_state.tello,),
-        daemon=True
-    )
-    search_thread.start()
-    tello_control.searching = True
-
 while True: # Loop principal
     if time.time() - st.session_state.last_update >= 5: # Atualiza a cada 5 segundos
         interface.update_interface_values()
