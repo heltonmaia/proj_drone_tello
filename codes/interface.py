@@ -6,9 +6,7 @@ import modules.chatbot as chatbot
 from tello_zune import TelloZune
 
 def initialize_session() -> None:
-    """
-    Inicializa variáveis de sessão para drone, câmera e histórico do chatbot.
-    """
+    """Inicializa variáveis de sessão para drone, câmera e histórico do chatbot."""
     if "tello" not in st.session_state:
         st.session_state.tello = TelloZune()
         st.session_state.command_log = tello_control.log_messages
@@ -68,8 +66,6 @@ def render_sidebar() -> None:
         if st.button("Encerrar Drone"):
             #st.session_state.cap.release()
             st.session_state.tello.end_tello()
-            st.session_state.tello.movesThread.stop()
-            tello_control.stop_searching.set()
             del st.session_state.tello
             st.stop()
 
