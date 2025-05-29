@@ -4,6 +4,7 @@ from modules.tracking_base import follow, draw
 from modules.qr_processing import process
 
 old_move = ''
+following_qr = False
 pace = ' 50'
 VALID_COMMANDS = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
