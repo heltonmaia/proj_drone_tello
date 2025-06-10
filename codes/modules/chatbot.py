@@ -40,19 +40,21 @@ def run_ai(prompt: str, frame: object) -> tuple:
         # Garante que log_messages seja uma string formatada para o prompt
         formatted_log_messages = ", ".join(log_messages) if log_messages and isinstance(log_messages, list) else "Nenhum comando enviado anteriormente nesta sessão."
 
-        # Constrói o prompt completo para o turno atual.
-        # Esta estrutura de prompt é enviada em cada turno para fornecer contexto completo.
-        # O histórico do chat também será usado implicitamente pelo modelo.
-        content_for_turn = [
-            f"""
-            ANÁLISE DE CENA PARA CONTROLE DE DRONE TELLO
+        user_prompt = prompt if prompt else "Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura."
+
+        # Constrói o prompt do sistema para o turno atual
+        system_prompt = f"""
+            ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
 
             Contexto:
             - Você é um sistema de IA avançado controlando um drone Tello em um ambiente interno.
-            - Objetivo Principal para esta interação: {prompt}
-            - Comandos de voo disponíveis: {COMMAND_LIST}
+            - Sua tarefa é analisar a imagem da câmera do drone e um objetivo fornecido (por texto ou áudio) para gerar o próximo comando de voo.
             - Histórico de comandos enviados ao drone nesta sessão: {formatted_log_messages}
-            - Unidades: Distâncias em centímetros (cm) para movimentos (ex: 'forward 50' para 50 cm para a frente). Rotações em graus (ex: 'cw 90' para 90 graus em sentido horário).
+            - Comandos de voo disponíveis: {COMMAND_LIST}
+            - Unidades: Distâncias em cm, rotações em graus.
+
+            Objetivo Principal para esta interação:
+            {user_prompt}
 
             Instruções Detalhadas:
             1.  Analise cuidadosamente a imagem fornecida (representa a visão atual do drone).
@@ -63,18 +65,20 @@ def run_ai(prompt: str, frame: object) -> tuple:
                 - Para rotações (cw, ccw), SEMPRE inclua os graus (geralmente entre 1-360 graus). Ex: 'ccw 45'.
                 - 'takeoff' e 'land' não necessitam de parâmetros numéricos.
             5.  Forneça uma justificativa clara e concisa para sua decisão, explicando como ela contribui para o objetivo ou para a segurança.
-            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena, o comando deve ser "Nenhum comando necessário".
+            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena, o comando deve ser "no command needed".
+            7.  Responda em inglês.
 
-            Formato Obrigatório da Resposta (use exatamente estes marcadores):
-            [ANÁLISE] Descrição detalhada da cena na imagem, incluindo objetos, distâncias estimadas se possível, e sua relevância para o objetivo.
-            [DECISÃO] O comando técnico exato (ex: 'forward 50', 'land', 'nenhum comando necessário').
-            [JUSTIFICATIVA] Explicação concisa da decisão tomada, relacionando-a com a análise da cena e o objetivo.
+            Formato Obrigatório da Resposta:
+            [ANALISYS] Descrição da cena e sua relevância para o objetivo.
+            [DECISION] O comando técnico exato.
+            [JUSTIFICATIVE] Explicação da decisão.
+            """
 
-            Restrições Adicionais:
-            - Priorize a segurança. Evite colisões.
-            - Os comandos devem ser para ações de curta a média distância, adequadas para ambientes internos.
-            - Se o drone estiver muito perto de um obstáculo na direção do movimento desejado, sugira um comando alternativo ou "Nenhum comando necessário" se não houver rota segura.
-            """,
+        # Constrói o prompt completo para o turno atual.
+        # Esta estrutura de prompt é enviada em cada turno para fornecer contexto completo.
+        # O histórico do chat também será usado implicitamente pelo modelo.
+        content_for_turn = [
+            system_prompt,
             Image.fromarray(frame)
         ]
 
@@ -86,11 +90,6 @@ def run_ai(prompt: str, frame: object) -> tuple:
             error_message = "Resposta da IA bloqueada ou vazia."
             if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                 error_message += f" Causa: {response.prompt_feedback.block_reason if hasattr(response.prompt_feedback, 'block_reason') else 'Não especificada'}."
-                # print(f"DEBUG: Prompt Feedback: {response.prompt_feedback}")
-                if hasattr(response.prompt_feedback, 'safety_ratings'):
-                    for rating in response.prompt_feedback.safety_ratings:
-                        if rating.probability != 'NEGLIGIBLE':
-                             error_message += f" Categoria de Segurança: {rating.category}, Probabilidade: {rating.probability}."
             return error_message, None
 
         natural_response_text = response.text
@@ -99,9 +98,9 @@ def run_ai(prompt: str, frame: object) -> tuple:
         # Extração do comando
         response_lines = natural_response_text.split('\n')
         for line in response_lines:
-            if line.startswith("[DECISÃO]"):
-                command_text = line.replace("[DECISÃO]", "").strip()
-                if command_text.lower() == "nenhum comando necessário" or not command_text:
+            if line.startswith("[DECISION]"):
+                command_text = line.replace("[DECISION]", "").strip()
+                if command_text.lower() == "no command needed" or not command_text:
                     extracted_command = None
                 else:
                     extracted_command = command_text

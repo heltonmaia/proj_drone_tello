@@ -1,4 +1,3 @@
-import time
 import streamlit as st
 import modules.tello_control as tello_control
 import interface

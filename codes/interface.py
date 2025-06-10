@@ -1,5 +1,4 @@
 import streamlit as st
-import time
 import cv2
 import modules.tello_control as tello_control
 import modules.chatbot as chatbot
@@ -13,8 +12,6 @@ def initialize_session() -> None:
         st.session_state.params_initialized = False
         st.session_state.last_user = ""
         st.session_state.last_ai = ""
-
-    st.session_state.last_update = time.time()
 
 def configure_interface() -> tuple:
     """
