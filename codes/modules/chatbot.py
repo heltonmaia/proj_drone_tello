@@ -65,13 +65,12 @@ def run_ai(prompt: str, frame: object) -> tuple:
                 - Para rotações (cw, ccw), SEMPRE inclua os graus (geralmente entre 1-360 graus). Ex: 'ccw 45'.
                 - 'takeoff' e 'land' não necessitam de parâmetros numéricos.
             5.  Forneça uma justificativa clara e concisa para sua decisão, explicando como ela contribui para o objetivo ou para a segurança.
-            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena, o comando deve ser "no command needed".
-            7.  Responda em inglês.
+            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena, o comando deve ser "nenhum comando necessário".
 
             Formato Obrigatório da Resposta:
-            [ANALISYS] Descrição da cena e sua relevância para o objetivo.
-            [DECISION] O comando técnico exato.
-            [JUSTIFICATIVE] Explicação da decisão.
+            [ANÁLISE] Descrição da cena e sua relevância para o objetivo.
+            [DECISÃO] O comando técnico exato.
+            [JUSTIFICATIVA] Explicação da decisão.
             """
 
         # Constrói o prompt completo para o turno atual.
@@ -98,9 +97,9 @@ def run_ai(prompt: str, frame: object) -> tuple:
         # Extração do comando
         response_lines = natural_response_text.split('\n')
         for line in response_lines:
-            if line.startswith("[DECISION]"):
-                command_text = line.replace("[DECISION]", "").strip()
-                if command_text.lower() == "no command needed" or not command_text:
+            if line.startswith("[DECISÃO]"):
+                command_text = line.replace("[DECISÃO]", "").strip()
+                if command_text.lower() == "nenhum comando necessário" or not command_text:
                     extracted_command = None
                 else:
                     extracted_command = command_text
