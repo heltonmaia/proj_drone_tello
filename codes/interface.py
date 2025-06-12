@@ -1,5 +1,4 @@
 import streamlit as st
-import time
 import cv2
 import modules.tello_control as tello_control
 import modules.chatbot as chatbot
@@ -13,11 +12,6 @@ def initialize_session() -> None:
         st.session_state.params_initialized = False
         st.session_state.last_user = ""
         st.session_state.last_ai = ""
-
-    #if "cap" not in st.session_state:
-    #    st.session_state.cap = cv2.VideoCapture(0) # webcam
-
-    st.session_state.last_update = time.time()
 
 def configure_interface() -> tuple:
     """
@@ -64,7 +58,6 @@ def render_sidebar() -> None:
             st.session_state.tello.send_cmd("land")
             st.session_state.command_log.append("land")
         if st.button("Encerrar Drone"):
-            #st.session_state.cap.release()
             st.session_state.tello.end_tello()
             del st.session_state.tello
             st.stop()
@@ -91,7 +84,6 @@ def render_text_input(text_input_placeholder) -> None:
     with text_input_placeholder.container():
         user_input = st.text_input("Envie um comando para o drone:", key="user_input")
         if st.button("Enviar") and user_input:
-            #ret, frame = st.session_state.cap.read()
             frame = st.session_state.tello.get_frame() # Por enquanto o frame é adquirido novamente
             current_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             response, command = chatbot.run_ai(user_input, current_frame)

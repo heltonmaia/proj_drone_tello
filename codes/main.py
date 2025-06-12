@@ -1,5 +1,3 @@
-import time
-import threading
 import streamlit as st
 import modules.tello_control as tello_control
 import interface
@@ -12,7 +10,6 @@ tello_control.searching = False
 if not hasattr(st.session_state.tello, "receiverThread") or not st.session_state.tello.receiverThread.is_alive():
     print("Iniciando o drone...")
     st.session_state.tello.start_tello()
-    #pass #webcam
 
 left_col, right_col, frame_placeholder, text_input_placeholder, response_placeholder = interface.configure_interface()
 
@@ -21,9 +18,7 @@ interface.render_sidebar()
 interface.render_text_input(text_input_placeholder)
 
 while True: # Loop principal
-    if time.time() - st.session_state.last_update >= 5: # Atualiza a cada 5 segundos
-        interface.update_interface_values()
-        st.session_state.last_update = time.time()
+    interface.update_interface_values()
 
     interface.render_response(response_placeholder) # Atualiza resposta
 
