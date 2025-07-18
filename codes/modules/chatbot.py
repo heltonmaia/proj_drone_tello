@@ -1,11 +1,12 @@
 import google.generativeai as genai
 from PIL import Image
+import numpy as np
 import traceback
 from modules import utils
 from modules.tello_control import log_messages
 
 utils.configure_generative_ai()
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel(model_name='gemini-1.5-flash') # type: ignore
 
 # Variável global para armazenar o objeto da sessão de chat
 chat_session = None
@@ -76,6 +77,8 @@ def run_ai(prompt: str, frame: object) -> tuple:
         # Constrói o prompt completo para o turno atual.
         # Esta estrutura de prompt é enviada em cada turno para fornecer contexto completo.
         # O histórico do chat também será usado implicitamente pelo modelo.
+        if not isinstance(frame, np.ndarray):
+            raise TypeError("O parâmetro 'frame' deve ser um array NumPy compatível com Image.fromarray.")
         content_for_turn = [
             system_prompt,
             Image.fromarray(frame)
