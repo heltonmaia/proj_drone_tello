@@ -2,6 +2,9 @@ import google.generativeai as genai
 from PIL import Image
 import numpy as np
 import traceback
+from scipy.io.wavfile import write
+import io
+
 from modules import utils
 from modules.tello_control import log_messages
 
@@ -26,24 +29,47 @@ def get_chat_session():
         print("Sessão de chat iniciada.")
     return chat_session
 
-def run_ai(prompt: str, frame: object) -> tuple:
+def run_ai(text: str, audio, frame: object) -> tuple:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:
-        prompt (str): Descrição do que o drone deve fazer.
+        text: Descrição do que o drone deve fazer.
         frame (object): Frame da câmera atual.
     Returns:
         tuple: (resposta natural, comando técnico)
     """
     try:
         current_chat = get_chat_session()
+        content_for_turn = []
+        SAMPLE_RATE = 44100
 
-        # Garante que log_messages seja uma string formatada para o prompt
+        # Garante que log_messages seja uma string formatada para o prtext
+
+        if audio is not None:
+            print("Áudio detectado.")
+            
+            mem_wav = io.BytesIO()
+            
+            write(mem_wav, SAMPLE_RATE, audio)
+            
+            wav_data = mem_wav.getvalue()
+
+            # A API do Gemini espera um dicionário com 'mime_type' e 'data' para os "parts"
+            audio_part = {
+                "mime_type": "audio/wav",
+                "data": wav_data,
+            }
+            content_for_turn.append(audio_part)
+            
+            user_text = ("O objetivo principal foi fornecido por áudio. "
+                        "Analise o arquivo de áudio anexado, transcreva seu conteúdo "
+                        "e use-o como o principal objetivo para esta interação.")
+        else:
+            # Se não houver áudio, usa a lógica de texto original
+            user_text = text if text else "Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura, apenas sugira, não faça"
+
         formatted_log_messages = ", ".join(log_messages) if log_messages and isinstance(log_messages, list) else "Nenhum comando enviado anteriormente nesta sessão."
 
-        user_prompt = prompt if prompt else "Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura."
-
-        # Constrói o prompt do sistema para o turno atual
         system_prompt = f"""
             ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
 
@@ -55,7 +81,7 @@ def run_ai(prompt: str, frame: object) -> tuple:
             - Unidades: Distâncias em cm, rotações em graus.
 
             Objetivo Principal para esta interação:
-            {user_prompt}
+            {user_text}
 
             Instruções Detalhadas:
             1.  Analise cuidadosamente a imagem fornecida (representa a visão atual do drone).
@@ -74,15 +100,12 @@ def run_ai(prompt: str, frame: object) -> tuple:
             [JUSTIFICATIVA] Explicação da decisão.
             """
 
-        # Constrói o prompt completo para o turno atual.
-        # Esta estrutura de prompt é enviada em cada turno para fornecer contexto completo.
-        # O histórico do chat também será usado implicitamente pelo modelo.
+        # Constrói o prompt para o turno atual.
+        content_for_turn.insert(0, system_prompt)
+        
         if not isinstance(frame, np.ndarray):
             raise TypeError("O parâmetro 'frame' deve ser um array NumPy compatível com Image.fromarray.")
-        content_for_turn = [
-            system_prompt,
-            Image.fromarray(frame)
-        ]
+        content_for_turn.append(Image.fromarray(frame))
 
         # Envia a mensagem para a sessão de chat ativa
         response = current_chat.send_message(content_for_turn)
