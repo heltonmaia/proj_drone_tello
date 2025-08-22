@@ -52,16 +52,16 @@ class TelloGUI:
 
         # Frame principal para o vídeo e chat
         main_frame = ttk.Frame(self.root)
-        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         main_frame.rowconfigure(0, weight=1, minsize=500)
         main_frame.rowconfigure(1, weight=0)
         main_frame.columnconfigure(0, weight=1)
 
-        # Frame da direita para controles e parâmetros
-        right_frame = ttk.Frame(self.root)
-        right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        right_frame.rowconfigure(0, weight=1)
-        right_frame.rowconfigure(1, weight=1)
+        # Frame da esquerda para controles e parâmetros
+        left_frame = ttk.Frame(self.root)
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        left_frame.rowconfigure(0, weight=1)
+        left_frame.rowconfigure(1, weight=1)
 
         # --- Componentes da Interface ---
         # Label para o vídeo
@@ -70,13 +70,13 @@ class TelloGUI:
 
         # Container para chat
         chat_frame = ttk.Frame(main_frame)
-        chat_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        chat_frame.grid(row=1, column=0, sticky="sew", pady=(10, 0))
         chat_frame.columnconfigure(0, weight=1)
         self._create_chat_widgets(chat_frame)
 
         # Container para controles (sidebar) e parâmetros
-        self._create_sidebar_widgets(right_frame)
-        self._create_params_widgets(right_frame)
+        self._create_sidebar_widgets(left_frame)
+        self._create_params_widgets(left_frame)
 
         # --- Iniciar Loops de Atualização ---
         self.update_video_frame()
@@ -93,9 +93,9 @@ class TelloGUI:
         """
         # Display da resposta
         self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 12, "bold"))
-        self.response_label_user.grid(row=0, column=0, sticky="w")
-        self.response_label_ai = ttk.Label(container, text="", wraplength=700) # wraplength quebra a linha
-        self.response_label_ai.grid(row=1, column=0, sticky="w")
+        self.response_label_user.grid(row=0, column=0, sticky="sew")
+        self.response_label_ai = ttk.Label(container, text="", wraplength=800) # wraplength quebra a linha
+        self.response_label_ai.grid(row=1, column=0, sticky="sew")
         
         # Texto
         input_frame = ttk.Frame(container)
@@ -110,9 +110,9 @@ class TelloGUI:
 
         # Áudio
         self.start_record_button = ttk.Button(input_frame, text="Iniciar Gravação", command=self.start_recording)
-        self.start_record_button.grid(row=2, column=0, sticky="es", pady=(10, 0), padx=(0, 5))
+        self.start_record_button.grid(row=2, column=0, sticky="s", pady=(10, 0), padx=(0, 5))
         self.stop_record_button = ttk.Button(input_frame, text="Parar Gravação", command=self.stop_recording, state="disabled")
-        self.stop_record_button.grid(row=2, column=1, sticky="es", pady=(10, 0), padx=(5, 0))
+        self.stop_record_button.grid(row=2, column=1, sticky="s", pady=(10, 0), padx=(5, 0))
 
     def _create_sidebar_widgets(self, container: ttk.Frame) -> None:
         """
@@ -253,9 +253,16 @@ class TelloGUI:
         threading.Thread(target=self._process_ai, args=(user_text, user_audio, array_frame), daemon=True).start()
         
         self.text_input_entry.delete(0, tk.END)
+        self.audio = None
 
-    def _process_ai(self, user_text: str, user_audio, frame: np.ndarray) -> None:
-        """Processa o comando da IA em uma thread separada."""
+    def _process_ai(self, user_text: str, user_audio: np.ndarray | None, frame: np.ndarray) -> None:
+        """
+        Processa o comando da IA em uma thread separada.
+        Args:
+            user_text (str): A mensagem do usuário.
+            user_audio (np.ndarray | None): O áudio do usuário.
+            frame (np.ndarray): O frame de vídeo do drone.
+        """
         response, command = chatbot.run_ai(user_text, user_audio, frame)
         
         # Atualizar a interface a partir da thread principal
@@ -271,7 +278,7 @@ class TelloGUI:
         """Captura e exibe um novo frame do drone."""
         # frame = self.tello.get_frame()
         frame = self.webcam.read()[1]
-        frame = cv2.resize(frame, (800, 600)) # Verificar
+        frame = cv2.resize(frame, (800, 600))
         
         processed_frame = tello_control.moves(self.tello, frame)
         
@@ -312,13 +319,23 @@ class TelloGUI:
         self.root.after(1000, self.update_stats)
 
     def _update_param_label(self, key: str, value: str) -> None:
+        """
+        Atualiza o label de um parâmetro específico.
+        Args:
+            key (str): A chave do parâmetro a ser atualizado.
+            value (str): O novo valor do parâmetro.
+        """
         if key in self.param_labels:
             label, unit = self.param_labels[key]
             text = f"{value if value is not None else 'N/A'} {unit}"
             label.config(text=text)
 
     def update_log(self, message: str) -> None:
-        """Adiciona uma mensagem ao log na interface."""
+        """
+        Adiciona uma mensagem ao log na interface.
+        Args:
+            message (str): A mensagem a ser adicionada ao log.
+        """
         tello_control.log_messages.append(message)
         
         # Atualiza a Listbox
@@ -327,16 +344,21 @@ class TelloGUI:
             self.log_listbox.insert(0, log)
 
     def update_chat_display(self, user_msg: str, ai_msg: str) -> None:
-        """Atualiza os labels do chat."""
+        """
+        Atualiza os labels do chat.
+        Args:
+            user_msg (str): A mensagem do usuário.
+            ai_msg (str): A mensagem do drone.
+        """
         self.response_label_user.config(text=f"Você: {user_msg}")
         self.response_label_ai.config(text=f"Drone: {ai_msg}")
 
-    def _record_audio(self):
-        print(f"Gravando por {AUDIO_DURATION} segundos")
+    def _record_audio(self) -> None:
+        """Função para gravar áudio em uma thread separada."""
         try:
-            self.audio = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE), 
-                                samplerate=SAMPLE_RATE, 
-                                channels=1, 
+            self.audio = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE),
+                                samplerate=SAMPLE_RATE,
+                                channels=1,
                                 dtype='int16')
             sd.wait()
             print("Gravação finalizada.")
@@ -349,18 +371,18 @@ class TelloGUI:
             
             self.root.after(0, self.reset_recording_buttons)
 
-    def start_recording(self):
+    def start_recording(self) -> None:
+        """Inicia a gravação de áudio."""
         self.is_recording = True
-        self.audio = None
         self.start_record_button.config(state="disabled", text=f"Gravando...({AUDIO_DURATION}s)")
         self.stop_record_button.config(state="normal")
         threading.Thread(target=self._record_audio, daemon=True).start()
 
-    def stop_recording(self):
-        self.is_recording = False
+    def stop_recording(self) -> None:
+        """Para a gravação de áudio."""
         sd.stop()
 
-    def reset_recording_buttons(self):
+    def reset_recording_buttons(self) -> None:
         """Função auxiliar para reabilitar o botão de gravação."""
         self.start_record_button.config(state="normal", text="Iniciar Gravação")
         self.stop_record_button.config(state="disabled")
