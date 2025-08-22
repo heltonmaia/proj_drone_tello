@@ -22,6 +22,8 @@ def get_chat_session():
     """
     Inicializa e retorna a sessão de chat.
     O chat é iniciado com um histórico vazio, pois o contexto completo é fornecido em cada mensagem.
+    Returns:
+        ChatSession: A sessão de chat.
     """
     global chat_session
     if chat_session is None:
@@ -29,11 +31,12 @@ def get_chat_session():
         print("Sessão de chat iniciada.")
     return chat_session
 
-def run_ai(text: str, audio, frame: object) -> tuple:
+def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:
         text: Descrição do que o drone deve fazer.
+        audio (np.ndarray | None): Áudio do usuário.
         frame (object): Frame da câmera atual.
     Returns:
         tuple: (resposta natural, comando técnico)
