@@ -1,16 +1,14 @@
-# Requirements for proj_drone_tello
-
 # Core dependencies
-opencv-python>=4.5.3.56
-numpy>=1.21.0
+opencv-python>=4.11.0.86
+numpy>=2.2.6
 pyzbar>=0.1.8
-
+pillow>=11.2.1
 tello-zune>=0.1.0
-streamlit>=1.12.0
 
 # AI / Chatbot
-google-generativeai>=0.3.2
-google-ai-generativelanguage>=0.4.0
+google-generativeai>=0.8.5
+google-ai-generativelanguage>=0.6.15
+sounddevice>=0.5.2
 
 
 
