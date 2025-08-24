@@ -25,7 +25,7 @@ class TelloGUI:
 
         # Configurações de estilo
         self.root.configure(bg=BG_COLOR)
-        self.root.geometry("1300x1000")
+        self.root.geometry("1200x1000")
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure('TFrame', background=BG_COLOR)
@@ -52,20 +52,20 @@ class TelloGUI:
 
         # Frame principal para o vídeo e chat
         main_frame = ttk.Frame(self.root)
-        main_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         main_frame.rowconfigure(0, weight=1, minsize=500)
         main_frame.rowconfigure(1, weight=0)
         main_frame.columnconfigure(0, weight=1)
 
         # Frame da esquerda para controles e parâmetros
-        left_frame = ttk.Frame(self.root)
-        left_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        left_frame.rowconfigure(0, weight=1)
-        left_frame.rowconfigure(1, weight=1)
+        right_frame = ttk.Frame(self.root)
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        right_frame.rowconfigure(0, weight=1)
+        right_frame.rowconfigure(1, weight=1)
 
         # --- Componentes da Interface ---
         # Label para o vídeo
-        self.video_label = tk.Label(main_frame, text="Iniciando câmera...", anchor="center")
+        self.video_label = tk.Label(main_frame, anchor="n")
         self.video_label.grid(row=0, column=0, sticky="nsew")
 
         # Container para chat
@@ -75,8 +75,8 @@ class TelloGUI:
         self._create_chat_widgets(chat_frame)
 
         # Container para controles (sidebar) e parâmetros
-        self._create_sidebar_widgets(left_frame)
-        self._create_params_widgets(left_frame)
+        self._create_sidebar_widgets(right_frame)
+        self._create_params_widgets(right_frame)
 
         # --- Iniciar Loops de Atualização ---
         self.update_video_frame()
@@ -92,11 +92,11 @@ class TelloGUI:
             container (ttk.Frame): Frame onde os widgets do chat serão colocados.
         """
         # Display da resposta
-        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 12, "bold"))
-        self.response_label_user.grid(row=0, column=0, sticky="sew")
-        self.response_label_ai = ttk.Label(container, text="", wraplength=800) # wraplength quebra a linha
-        self.response_label_ai.grid(row=1, column=0, sticky="sew")
-        
+        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 12), wraplength=800, justify="left")
+        self.response_label_user.grid(row=0, column=0, sticky="sew", pady=(0, 5))
+        self.response_label_ai = ttk.Label(container, text="", font=("Ubuntu", 12), justify="left", wraplength=800) # wraplength quebra a linha
+        self.response_label_ai.grid(row=1, column=0, sticky="sew", pady=(0, 5))
+
         # Texto
         input_frame = ttk.Frame(container)
         input_frame.grid(row=2, column=0, sticky="ew", pady=5)
@@ -166,11 +166,11 @@ class TelloGUI:
         self.param_labels = {}
         
         params_info = {
-            'battery': ("images/battery_icon.png", "%"), # (icon_path, unit)
-            'height': ("images/height_icon.png", "cm"),
-            'temp': ("images/temp_icon.png", "°C"),
-            'pres': ("images/pressure_icon.png", "hPa"),
-            'time': ("images/time_icon.png", "s")
+            'battery': ("icons/battery_icon.png", "%"), # (icon_path, unit)
+            'height': ("icons/height_icon.png", "cm"),
+            'temp': ("icons/temp_icon.png", "°C"),
+            'pres': ("icons/pressure_icon.png", "hPa"),
+            'time': ("icons/time_icon.png", "s")
         }
 
         for i, (key, (icon_path, unit)) in enumerate(params_info.items()):
@@ -178,14 +178,11 @@ class TelloGUI:
             row_frame.pack(fill='x', padx=5, pady=5)
             
             try:
-                # Tenta abrir a imagem a partir do caminho especificado
                 img = Image.open(icon_path).resize((30, 30), Image.Resampling.LANCZOS)
                 
-                # Cria o objeto de imagem do Tkinter e o armazena no nosso dicionário
                 photo_image = ImageTk.PhotoImage(img)
                 self.param_icons[key] = photo_image
                 
-                # Cria o Label para o ícone
                 icon_label = ttk.Label(row_frame, image=self.param_icons[key])
                 
                 icon_label.pack(side="left", padx=(0, 10))
@@ -201,8 +198,7 @@ class TelloGUI:
             value_label.pack(side="left")
             self.param_labels[key] = (value_label, unit)
 
-
-    # --- Funções de Controle (Lógica dos botões) ---
+    # --- Funções de Controle ---
     
     def takeoff(self) -> None:
         """Inicia a decolagem do drone e atualiza o log."""
@@ -215,7 +211,12 @@ class TelloGUI:
         self.update_log("land")
 
     def show_message(self, title: str, message: str) -> None:
-        """Exibe uma mensagem de alerta."""
+        """
+        Exibe uma mensagem de alerta.
+        Args:
+            title (str): O título da mensagem.
+            message (str): O conteúdo da mensagem.
+        """
         messagebox.showinfo(title, message)
 
     def update_pace(self) -> None:
@@ -278,7 +279,7 @@ class TelloGUI:
         """Captura e exibe um novo frame do drone."""
         # frame = self.tello.get_frame()
         frame = self.webcam.read()[1]
-        frame = cv2.resize(frame, (800, 600))
+        frame = cv2.resize(frame, DISPLAY_SIZE)
         
         processed_frame = tello_control.moves(self.tello, frame)
         
