@@ -53,7 +53,7 @@ sudo apt-get install portaudio19-dev
    - Clique em "Enviar" ou pressione a tecla Enter na caixa de texto
 
 ## **Comandos Válidos via QR Code**
- O drone reconhece comandos via código QR, basta ele detectar pela câmera.
+ O drone reconhece comandos via código QR, basta ele detectar o texto pela câmera.
 
 | Comando         | Descrição                    |
 |-----------------|------------------------------|
@@ -71,9 +71,6 @@ sudo apt-get install portaudio19-dev
 ## **Demonstração**
  Interface de usuário
 ![Tela de controle](images/interface.png)
-
- Controle via QR Code
-![Demonstração QR](images/qr.gif)
 
  Controle via Chatbot
 ![Demonstração Chatbot](images/chatbot.gif)
