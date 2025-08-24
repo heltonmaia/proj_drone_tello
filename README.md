@@ -59,14 +59,14 @@ sudo apt-get install portaudio19-dev
 |-----------------|------------------------------|
 | `takeoff`       | Decolar                      |
 | `land`          | Pousar                       |
-| `up x`          | Subir x cm                   |
-| `down x`        | Descer x cm                  |
-| `right x`       | Mover-se à direita x cm      |
-| `left x`        | Mover-se à esquerda x cm     |
-| `forward x`     | Mover-se para frente x cm    |
-| `back x`        | Mover-se para trás x cm      |
+| `up`            | Subir x cm                   |
+| `down`          | Descer x cm                  |
+| `right`         | Mover-se à direita x cm      |
+| `left`          | Mover-se à esquerda x cm     |
+| `forward`       | Mover-se para frente x cm    |
+| `back`          | Mover-se para trás x cm      |
 | `follow`        | Seguir                       |
-
+ (x é o passo, esse valor pode ser alterado na interface de usuário)
 
 ## **Demonstração**
 ### Interface de usuário
