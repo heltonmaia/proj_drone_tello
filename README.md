@@ -66,7 +66,8 @@ sudo apt-get install portaudio19-dev
 | `forward`       | Mover-se para frente x cm    |
 | `back`          | Mover-se para trás x cm      |
 | `follow`        | Seguir                       |
- (x é o passo, esse valor pode ser alterado na interface de usuário)
+
+(x é o passo, esse valor pode ser alterado na interface de usuário)
 
 ## **Demonstração**
 ### Interface de usuário
