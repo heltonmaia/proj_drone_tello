@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -38,12 +39,16 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        # self.tello.start_tello()
+        self.tello.start_tello()
         self.command_log = tello_control.log_messages
         tello_control.pace = "50" # Valor inicial do passo
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.audio = None
+        self.video_frame = None
         self.is_recording = False
+        self.fps_counter = 0
+        self.last_time_fps = time.time()
+        self.fps = 0 # FPS calculado
 
         # Configurações de layout da janela
         self.root.columnconfigure(0, weight=3) # Coluna do vídeo (75%)
@@ -167,6 +172,7 @@ class TelloGUI:
         
         params_info = {
             'battery': ("icons/battery_icon.png", "%"), # (icon_path, unit)
+            'fps': ("icons/fps_icon.png", "fps"),
             'height': ("icons/height_icon.png", "cm"),
             'temp': ("icons/temp_icon.png", "°C"),
             'pres': ("icons/pressure_icon.png", "hPa"),
@@ -239,35 +245,27 @@ class TelloGUI:
         
         user_audio = self.audio
 
-        # frame = self.tello.get_frame()
-        frame = self.webcam.read()[1] # Lê o frame da webcam
-
-        array_frame = None
-        if isinstance(frame, (list, tuple)):
-            array_frame = np.array(frame)
-        elif isinstance(frame, np.ndarray):
-            array_frame = frame
-
-        array_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = self.img_ai
         
         # Inicia o processamento do comando da IA em uma thread separada
-        threading.Thread(target=self._process_ai, args=(user_text, user_audio, array_frame), daemon=True).start()
+        threading.Thread(target=self._process_ai, args=(user_text, user_audio, frame), daemon=True).start()
         
         self.text_input_entry.delete(0, tk.END)
         self.audio = None
 
-    def _process_ai(self, user_text: str, user_audio: np.ndarray | None, frame: np.ndarray) -> None:
+    def _process_ai(self, user_text: str, user_audio: np.ndarray | None, frame: Image.Image) -> None:
         """
         Processa o comando da IA em uma thread separada.
         Args:
             user_text (str): A mensagem do usuário.
             user_audio (np.ndarray | None): O áudio do usuário.
-            frame (np.ndarray): O frame de vídeo do drone.
+            frame (Image.Image): O frame atual da câmera.
         """
         response, command = chatbot.run_ai(user_text, user_audio, frame)
         
         # Atualizar a interface a partir da thread principal
-        self.root.after(0, self.update_chat_display, user_text, response)
+        user = user_text if not None else "Áudio"
+        self.root.after(0, self.update_chat_display, user, response)
         
         if command and chatbot.validate_command(command):
             tello_control.process_ai_command(self.tello, command)
@@ -276,40 +274,47 @@ class TelloGUI:
     # --- Funções de Atualização da Interface ---
 
     def update_video_frame(self) -> None:
-        """Captura e exibe um novo frame do drone."""
-        # frame = self.tello.get_frame()
-        frame = self.webcam.read()[1]
+        """Captura, processa e exibe um novo frame de vídeo."""
+        frame = self.tello.get_frame()
+        # frame = self.webcam.read()[1] # Ativar webcam
         frame = cv2.resize(frame, DISPLAY_SIZE)
-        
-        processed_frame = tello_control.moves(self.tello, frame)
-        
-        array_frame = None
-        if isinstance(processed_frame, (list, tuple, cv2.Mat)):
-            array_frame = np.array(processed_frame)
-        elif isinstance(processed_frame, np.ndarray):
-            array_frame = processed_frame
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        processed_frame = tello_control.moves(self.tello, img_rgb)
 
-        if isinstance(array_frame, np.ndarray) and array_frame.ndim == 3:
-            img = cv2.cvtColor(array_frame, cv2.COLOR_BGR2RGB)
-            img = Image.fromarray(img)
-            photo = ImageTk.PhotoImage(image=img)
+        # Garante que temos um array válido antes de prosseguir.
+        if isinstance(processed_frame, np.ndarray):
+            self.img_ai = Image.fromarray(processed_frame)
+
+            photo = ImageTk.PhotoImage(image=self.img_ai)
         else:
-            # Se processed_frame não for válido, exibe um frame preto
-            img = Image.new("RGB", (800, 600), color="black")
-            photo = ImageTk.PhotoImage(image=img)
+            null_img = Image.new("RGB", DISPLAY_SIZE, color="black")
+            photo = ImageTk.PhotoImage(image=null_img)
         
         self.video_label.config(image=photo)
-        self._video_image = photo
-        
-        # Agendar a próxima atualização
-        self.root.after(30, self.update_video_frame)
+        self._video_frame = photo
+
+        # Contagem de frames para cálculo do FPS
+        self.fps_counter += 1
+
+        # Agenda a próxima atualização
+        self.root.after(15, self.update_video_frame)
         
     def update_stats(self) -> None:
         """Atualiza os valores dos parâmetros do drone."""
+        # FPS
+        now = time.time()
+        time_fps = now - self.last_time_fps
+        if time_fps > 0:
+            self.fps = self.fps_counter / time_fps
+        self.fps_counter = 0
+        self.last_time_fps = now
+        int_fps = int(self.fps)
+
         stats = self.tello.get_info()
         bat, height, temph, pres, time_elapsed = stats
 
         # Atualiza os labels
+        self._update_param_label('fps', int_fps)
         self._update_param_label('battery', bat)
         self._update_param_label('height', height)
         self._update_param_label('temp', temph)
@@ -319,12 +324,12 @@ class TelloGUI:
         # Agendar a próxima atualização a cada segundo
         self.root.after(1000, self.update_stats)
 
-    def _update_param_label(self, key: str, value: str) -> None:
+    def _update_param_label(self, key: str, value: int | float) -> None:
         """
         Atualiza o label de um parâmetro específico.
         Args:
             key (str): A chave do parâmetro a ser atualizado.
-            value (str): O novo valor do parâmetro.
+            value (int | float): O novo valor do parâmetro.
         """
         if key in self.param_labels:
             label, unit = self.param_labels[key]

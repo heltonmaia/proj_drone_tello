@@ -31,13 +31,13 @@ def get_chat_session():
         print("Sessão de chat iniciada.")
     return chat_session
 
-def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
+def run_ai(text: str, audio: np.ndarray | None, frame: Image.Image) -> tuple[str, str | None]:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:
         text: Descrição do que o drone deve fazer.
         audio (np.ndarray | None): Áudio do usuário.
-        frame (object): Frame da câmera atual.
+        frame (Image.Image): Frame da câmera atual.
     Returns:
         tuple: (resposta natural, comando técnico)
     """
@@ -46,7 +46,8 @@ def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
         content_for_turn = []
         SAMPLE_RATE = 44100
 
-        # Garante que log_messages seja uma string formatada para o prtext
+        # Garante que log_messages seja uma string formatada para o prompt
+        formatted_log_messages = ", ".join(log_messages) if log_messages and isinstance(log_messages, list) else "Nenhum comando enviado anteriormente nesta sessão."
 
         if audio is not None:
             print("Áudio detectado.")
@@ -64,9 +65,7 @@ def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
             }
             content_for_turn.append(audio_part)
             
-            user_text = ("O objetivo principal foi fornecido por áudio. "
-                        "Analise o arquivo de áudio anexado, transcreva seu conteúdo "
-                        "e use-o como o principal objetivo para esta interação.")
+            user_text = f"""O objetivo principal foi fornecido por áudio. "Analise o arquivo de áudio anexado e use-o como o principal objetivo para esta interação."""
         else:
             # Se não houver áudio, usa a lógica de texto original
             user_text = text if text else "Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura, apenas sugira, não faça"
@@ -87,15 +86,15 @@ def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
             {user_text}
 
             Instruções Detalhadas:
-            1.  Analise cuidadosamente a imagem fornecida (representa a visão atual do drone).
+            1.  Analise cuidadosamente a imagem fornecida representa a visão atual do drone.
             2.  Identifique obstáculos, alvos, ou condições relevantes para o 'Objetivo Principal'.
             3.  Com base na análise, no objetivo, e no histórico de comandos, decida a próxima ação.
             4.  Gere UM ÚNICO comando técnico da lista de comandos disponíveis.
                 - Para movimentos (up, down, left, right, forward, back), SEMPRE inclua a distância em cm (geralmente entre 20-500 cm). Ex: 'forward 30'.
-                - Para rotações (cw, ccw), SEMPRE inclua os graus (geralmente entre 1-360 graus). Ex: 'ccw 45'.
+                - Para rotações (cw, ccw), SEMPRE inclua os graus (entre 1-360 graus). Ex: 'ccw 45'.
                 - 'takeoff' e 'land' não necessitam de parâmetros numéricos.
             5.  Forneça uma justificativa clara e concisa para sua decisão, explicando como ela contribui para o objetivo ou para a segurança.
-            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena, o comando deve ser "nenhum comando necessário".
+            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena (como: "descreva a imagem"), o comando deve ser "nenhum comando necessário".
 
             Formato Obrigatório da Resposta:
             [ANÁLISE] Descrição da cena e sua relevância para o objetivo.
@@ -106,9 +105,7 @@ def run_ai(text: str, audio: np.ndarray | None, frame: object) -> tuple:
         # Constrói o prompt para o turno atual.
         content_for_turn.insert(0, system_prompt)
         
-        if not isinstance(frame, np.ndarray):
-            raise TypeError("O parâmetro 'frame' deve ser um array NumPy compatível com Image.fromarray.")
-        content_for_turn.append(Image.fromarray(frame))
+        content_for_turn.append(frame)
 
         # Envia a mensagem para a sessão de chat ativa
         response = current_chat.send_message(content_for_turn)
