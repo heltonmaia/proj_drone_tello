@@ -41,7 +41,6 @@ class TelloGUI:
         self.tello = TelloZune()
         self.tello.start_tello()
         self.command_log = tello_control.log_messages
-        tello_control.pace = "50" # Valor inicial do passo
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.audio = None
         self.video_frame = None
@@ -49,6 +48,8 @@ class TelloGUI:
         self.fps_counter = 0
         self.last_time_fps = time.time()
         self.fps = 0 # FPS calculado
+        self.is_sequence_running = False
+        self.max_steps = "5"
 
         # Configurações de layout da janela
         self.root.columnconfigure(0, weight=3) # Coluna do vídeo (75%)
@@ -129,19 +130,22 @@ class TelloGUI:
         sidebar_frame.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
         sidebar_frame.columnconfigure(0, weight=1)
         
-        ttk.Button(sidebar_frame, text="Decolar", command=self.takeoff).pack(fill="x", padx=5, pady=2)
-        ttk.Button(sidebar_frame, text="Pousar", command=self.land).pack(fill="x", padx=5, pady=2)
+        self.takeoff_button = ttk.Button(sidebar_frame, text="Decolar", command=self.takeoff)
+        self.takeoff_button.pack(fill="x", padx=5, pady=2)
+        self.land_button = ttk.Button(sidebar_frame, text="Pousar", command=self.land)
+        self.land_button.pack(fill="x", padx=5, pady=2)
         ttk.Button(sidebar_frame, text="Encerrar Drone", command=self._exit).pack(fill="x", padx=5, pady=5)
 
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=5, padx=5)
 
         pace_frame = ttk.Frame(sidebar_frame)
         pace_frame.pack(fill='x', padx=5, pady=2)
-        ttk.Label(pace_frame, text="Passo (cm):").pack(side="left")
-        self.pace_input = ttk.Entry(pace_frame, width=5)
-        self.pace_input.insert(0, tello_control.pace)
-        self.pace_input.pack(side="left", padx=5)
-        ttk.Button(pace_frame, text="Atualizar", command=self.update_pace).pack(side="left")
+        ttk.Label(pace_frame, text="Max. Passos:").pack(side="left")
+        self.max_steps_input = ttk.Entry(pace_frame, width=5)
+        self.max_steps_input.insert(0, str(self.max_steps))
+        self.max_steps_input.pack(side="left", padx=5)
+        self.max_steps_button = ttk.Button(pace_frame, text="Atualizar", command=self.update_max_steps)
+        self.max_steps_button.pack(side="left")
 
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=5, padx=5)
 
@@ -225,12 +229,12 @@ class TelloGUI:
         """
         messagebox.showinfo(title, message)
 
-    def update_pace(self) -> None:
+    def update_max_steps(self) -> None:
         """Atualiza o passo do drone com o valor inserido pelo usuário."""
-        new_pace = self.pace_input.get()
-        if new_pace.isdigit():
-            tello_control.pace = new_pace
-            print(f"Passo atualizado para: {tello_control.pace}")
+        new_max_steps = self.max_steps_input.get()
+        if new_max_steps.isdigit():
+            self.max_steps = int(new_max_steps)
+            print(f"Número máximos de passos atualizado para: {self.max_steps}")
 
     def clear_logs(self) -> None:
         """Limpa o log de comandos e a lista de mensagens."""
@@ -240,36 +244,96 @@ class TelloGUI:
         print("Logs limpos.")
 
     def send_ai_command(self) -> None:
-        """Envia o comando de IA para o drone com base na entrada do usuário."""
-        user_text = self.text_input_entry.get()
-        
-        user_audio = self.audio
+        """
+        Prepara e inicia a sequência de comandos da IA em uma thread gerenciadora.
+        """
+        # Se uma sequência já estiver rodando, impede uma nova.
+        if self.is_sequence_running:
+            print("Aviso: Sequência de IA já em andamento.")
+            return
 
+        user_text = self.text_input_entry.get()
+        user_audio = self.audio
         frame = self.img_ai
-        
-        # Inicia o processamento do comando da IA em uma thread separada
-        threading.Thread(target=self._process_ai, args=(user_text, user_audio, frame), daemon=True).start()
-        
+
+        # Limpa os campos da UI imediatamente
         self.text_input_entry.delete(0, tk.END)
         self.audio = None
 
-    def _process_ai(self, user_text: str, user_audio: np.ndarray | None, frame: Image.Image) -> None:
+        # Inicia a thread do Controlador de Missão
+        threading.Thread(
+            target=self._execute_ai_sequence,
+            args=(user_text, user_audio, frame),
+            daemon=True
+        ).start()
+
+    def _execute_ai_sequence(self, user_text: str | None, user_audio: np.ndarray | None, initial_frame: Image.Image) -> None:
         """
-        Processa o comando da IA em uma thread separada.
+        Roda em uma thread e gerencia o loop de múltiplos passos.
         Args:
-            user_text (str): A mensagem do usuário.
-            user_audio (np.ndarray | None): O áudio do usuário.
-            frame (Image.Image): O frame atual da câmera.
+            user_text (str | None): A entrada de texto do usuário.
+            user_audio (np.ndarray | None): A entrada de áudio do usuário.
+            initial_frame (Image.Image): O frame inicial da câmera.
         """
-        response, command = chatbot.run_ai(user_text, user_audio, frame)
+        self.is_sequence_running = True
+        self.root.after(0, self._set_ui_for_sequence, True) # Desabilita a UI por segurança
+
+        MAX_STEPS = int(self.max_steps)
+        current_frame = initial_frame
         
-        # Atualizar a interface a partir da thread principal
-        user = user_text if not None else "Áudio"
-        self.root.after(0, self.update_chat_display, user, response)
-        
-        if command and chatbot.validate_command(command):
-            tello_control.process_ai_command(self.tello, command)
-            self.root.after(0, self.update_log, command)
+        try:
+            for step in range(MAX_STEPS):
+                # Na primeira iteração, usa a entrada original do usuário. Nas seguintes, um prompt genérico.
+                prompt_text = user_text if step == 0 else f'Continue a rota com base na nova imagem. (Passo {step + 1}/{MAX_STEPS})'
+                audio_data = user_audio if step == 0 else None
+                
+                response, command, continue_route = chatbot.run_ai(prompt_text, audio_data, current_frame)
+                
+                # Atualiza o chat na UI
+                user_msg_display = user_text if (step == 0 and user_text) else ('Áudio' if user_audio else f'Passo {step + 1}')
+                self.root.after(0, self.update_chat_display, user_msg_display, response)
+
+                if command and chatbot.validate_command(command):
+                    tello_control.process_ai_command(self.tello, command)
+                    self.root.after(0, self.update_log, f'{step + 1}: {command}')
+                else:
+                    print("IA não forneceu um comando válido. Encerrando sequência.")
+                    break
+
+                if not continue_route:
+                    print("IA sinalizou o fim da rota.")
+                    break
+                
+                time.sleep(5) # Pausa para o drone agir
+                
+                # Captura um novo frame para a próxima iteração
+                frame_bgr = self.tello.get_frame()
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                # frame_rgb = self.webcam.read()[1]
+                current_frame = Image.fromarray(frame_rgb)
+
+        except Exception as e:
+            print(f"Erro crítico durante a execução da sequência: {e}")
+        finally:
+            self.is_sequence_running = False
+            self.root.after(0, self._set_ui_for_sequence, False) # Reabilita a UI
+
+    def _set_ui_for_sequence(self, is_running: bool) -> None:
+        """
+        Habilita ou desabilita os controles da UI durante uma sequência.
+        Args:
+            is_running (bool): Indica se a sequência está em execução.
+        """
+        if is_running:
+            state = "disabled"
+        else:
+            state = "normal"
+
+        self.send_text_button.config(state=state)
+        self.start_record_button.config(state=state)
+        self.takeoff_button.config(state=state)
+        self.land_button.config(state=state)
+        self.max_steps_button.config(state=state)
 
     # --- Funções de Atualização da Interface ---
 
@@ -279,12 +343,10 @@ class TelloGUI:
         # frame = self.webcam.read()[1] # Ativar webcam
         frame = cv2.resize(frame, DISPLAY_SIZE)
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        processed_frame = tello_control.moves(self.tello, img_rgb)
 
         # Garante que temos um array válido antes de prosseguir.
-        if isinstance(processed_frame, np.ndarray):
-            self.img_ai = Image.fromarray(processed_frame)
-
+        if isinstance(img_rgb, np.ndarray):
+            self.img_ai = Image.fromarray(img_rgb)
             photo = ImageTk.PhotoImage(image=self.img_ai)
         else:
             null_img = Image.new("RGB", DISPLAY_SIZE, color="black")
@@ -297,7 +359,7 @@ class TelloGUI:
         self.fps_counter += 1
 
         # Agenda a próxima atualização
-        self.root.after(15, self.update_video_frame)
+        self.root.after(20, self.update_video_frame)
         
     def update_stats(self) -> None:
         """Atualiza os valores dos parâmetros do drone."""
