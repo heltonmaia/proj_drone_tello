@@ -17,7 +17,6 @@ TEXT_COLOR = "#FFFFFF"
 LBF_COLOR = "#3c3c3c"
 SAMPLE_RATE = 44100
 AUDIO_DURATION = 5
-DISPLAY_SIZE = (800, 600)
 
 class TelloGUI:
     def __init__(self, root: tk.Tk) -> None:
@@ -39,17 +38,26 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        self.tello.start_tello()
+        # connected = self.tello.start_tello()
+
+        # if not connected:
+        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+        #     self.root.destroy()
+        #     return
+
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.audio = None
         self.video_frame = None
         self.is_recording = False
         self.fps_counter = 0
+        self.video_size = (800, 600)
+        self.tello.set_image_size(self.video_size)
         self.last_time_fps = time.time()
         self.fps = 0 # FPS calculado
         self.is_sequence_running = False
         self.max_steps = "5"
+        self.abort_sequence_event = threading.Event()
 
         # Configurações de layout da janela
         self.root.columnconfigure(0, weight=3) # Coluna do vídeo (75%)
@@ -134,7 +142,10 @@ class TelloGUI:
         self.takeoff_button.pack(fill="x", padx=5, pady=2)
         self.land_button = ttk.Button(sidebar_frame, text="Pousar", command=self.land)
         self.land_button.pack(fill="x", padx=5, pady=2)
-        ttk.Button(sidebar_frame, text="Encerrar Drone", command=self._exit).pack(fill="x", padx=5, pady=5)
+        self.finish_button = ttk.Button(sidebar_frame, text="Encerrar Drone", command=self._exit)
+        self.finish_button.pack(fill="x", padx=5, pady=2)
+        self.emergency_button = ttk.Button(sidebar_frame, text="Emergência", command=self.emergency_stop)
+        self.emergency_button.pack(fill="x", padx=5, pady=5)
 
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=5, padx=5)
 
@@ -276,6 +287,7 @@ class TelloGUI:
             initial_frame (Image.Image): O frame inicial da câmera.
         """
         self.is_sequence_running = True
+        self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True) # Desabilita a UI por segurança
 
         MAX_STEPS = int(self.max_steps)
@@ -304,12 +316,18 @@ class TelloGUI:
                     print("IA sinalizou o fim da rota.")
                     break
                 
-                time.sleep(5) # Pausa para o drone agir
+                was_interrupted = self.abort_sequence_event.wait(5)
+
+                # Se o evento foi sinalizado (botão de abortar foi clicado)
+                if was_interrupted:
+                    print("Sequência abortada pelo usuário!")
+                    self.tello.send_cmd('stop') # Comando de segurança para parar o drone
+                    break # Sai do loop imediatamente
                 
                 # Captura um novo frame para a próxima iteração
-                frame_bgr = self.tello.get_frame()
-                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                # frame_rgb = self.webcam.read()[1]
+                # frame_bgr = self.tello.get_frame()
+                # frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                frame_rgb = self.webcam.read()[1]
                 current_frame = Image.fromarray(frame_rgb)
 
         except Exception as e:
@@ -339,9 +357,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        frame = self.tello.get_frame()
-        # frame = self.webcam.read()[1] # Ativar webcam
-        frame = cv2.resize(frame, DISPLAY_SIZE)
+        # frame = self.tello.get_frame()
+        frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
@@ -349,7 +366,7 @@ class TelloGUI:
             self.img_ai = Image.fromarray(img_rgb)
             photo = ImageTk.PhotoImage(image=self.img_ai)
         else:
-            null_img = Image.new("RGB", DISPLAY_SIZE, color="black")
+            null_img = Image.new("RGB", self.video_size, color="black")
             photo = ImageTk.PhotoImage(image=null_img)
         
         self.video_label.config(image=photo)
@@ -454,6 +471,13 @@ class TelloGUI:
         """Função auxiliar para reabilitar o botão de gravação."""
         self.start_record_button.config(state="normal", text="Iniciar Gravação")
         self.stop_record_button.config(state="disabled")
+
+    def emergency_stop(self) -> None:
+        """Função para parar imediatamente o drone."""
+        self.tello.send_cmd('stop')
+        if self.abort_sequence_event:
+            self.abort_sequence_event.set()
+        print("Comando de emergência enviado ao drone.")
 
     def _exit(self) -> None:
         """Função chamada ao fechar a janela."""
