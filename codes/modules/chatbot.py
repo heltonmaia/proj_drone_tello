@@ -83,8 +83,8 @@ def run_ai(text: str | None, audio: np.ndarray | None, frame: Image.Image) -> tu
             {user_text}
 
             Instruções Detalhadas:
-            1.  Analise cuidadosamente a imagem fornecida representa a visão atual do drone.
-            2.  Identifique obstáculos, alvos, ou condições relevantes para o 'Objetivo Principal'.
+            1.  Analise cuidadosamente a imagem fornecida, que representa a visão atual do drone.
+            2.  Identifique obstáculos, alvos, ou condições relevantes para o objetivo principal.
             3.  Com base na análise, no objetivo, e no histórico de comandos, decida a próxima ação.
             4.  Gere um comando técnico da lista de comandos disponíveis.
                 - Para movimentos (up, down, left, right, forward, back), SEMPRE inclua a distância em cm (geralmente entre 20-500 cm). Ex: 'forward 30'.
@@ -92,15 +92,15 @@ def run_ai(text: str | None, audio: np.ndarray | None, frame: Image.Image) -> tu
                 - 'takeoff' e 'land' não necessitam de parâmetros numéricos.
             5.  Forneça uma justificativa para sua decisão, explicando como ela contribui para o objetivo ou para a segurança.
             6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena (como: "descreva a imagem"), o comando deve ser "nenhum comando necessário".
-            7.  Caso o objetivo não possa ser cumprido com um único movimento, sinalize que a rota deve continuar com duas
-            respostas possíveis obrigatoriamente: "sim" ou "não". Priorize movimentos simples, sem continuação.
-            8.  Caso nenhum comando seja necessário, a continuação da rota deve ser "não".
+            7.  Caso o objetivo não possa ser cumprido com um único movimento, sinalize que a rota deve continuar da seguinte forma: adicione o marcador "[CONTINUA]", isso inicia o processo de comandos compostos. Priorize movimentos simples, sem continuação.
+            8.  Caso nenhum comando seja necessário, não deve ter continuação de rota.
+            9.  Em comandos compostos, evite fazer movimentos para direções fora de seu campo de visão. Primeiro avalie a cena.
 
             Formato Obrigatório da Resposta:
-            [ANÁLISE] Descrição da cena e sua relevância para o objetivo.
+            [ANÁLISE] Descrição da cena.
             [DECISÃO] O comando técnico exato.
             [JUSTIFICATIVA] Explicação da decisão.
-            [CONTINUA] Caso seja necessário continuar a trajetória: sim ou não
+            [CONTINUA] Caso seja necessário continuar a trajetória. Caso contrário, omita esta linha.
             """
 
         # Constrói o prompt para o turno atual.
@@ -133,12 +133,8 @@ def run_ai(text: str | None, audio: np.ndarray | None, frame: Image.Image) -> tu
                     extracted_command = command_text
                 continue
             
-            if line.startswith('[CONTINUA]'):
-                cont_route_text = line.replace('[CONTINUA]', '').strip().lower()
-                if cont_route_text == 'sim':
-                    continue_route = True
-                else:
-                    continue_route = False
+            elif line.startswith('[CONTINUA]'):
+                continue_route = True
         
         return natural_response_text, extracted_command, continue_route
 
