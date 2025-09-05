@@ -38,12 +38,12 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        # connected = self.tello.start_tello()
+        connected = self.tello.start_tello()
 
-        # if not connected:
-        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
-        #     self.root.destroy()
-        #     return
+        if not connected:
+            messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+            self.root.destroy()
+            return
 
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
@@ -227,7 +227,7 @@ class TelloGUI:
         self.update_log("takeoff")
 
     def land(self) -> None:
-        """Pousa do drone e atualiza o log."""
+        """Pousa o drone e atualiza o log."""
         self.tello.land()
         self.update_log("land")
 
@@ -309,25 +309,22 @@ class TelloGUI:
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
                 else:
-                    print("IA não forneceu um comando válido. Encerrando sequência.")
                     break
 
                 if not continue_route:
-                    print("IA sinalizou o fim da rota.")
                     break
                 
                 was_interrupted = self.abort_sequence_event.wait(5)
 
                 # Se o evento foi sinalizado (botão de abortar foi clicado)
                 if was_interrupted:
-                    print("Sequência abortada pelo usuário!")
                     self.tello.send_cmd('stop') # Comando de segurança para parar o drone
                     break # Sai do loop imediatamente
                 
                 # Captura um novo frame para a próxima iteração
-                # frame_bgr = self.tello.get_frame()
-                # frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                frame_rgb = self.webcam.read()[1]
+                frame_bgr = self.tello.get_frame()
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                # frame_rgb = self.webcam.read()[1]
                 current_frame = Image.fromarray(frame_rgb)
 
         except Exception as e:
@@ -357,8 +354,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        # frame = self.tello.get_frame()
-        frame = self.webcam.read()[1] # Ativar webcam
+        frame = self.tello.get_frame()
+        # frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
