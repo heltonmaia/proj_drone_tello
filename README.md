@@ -4,11 +4,11 @@
 - [Bruno Marques](https://sigaa.ufrn.br/sigaa/public/docente/portal.jsf?siape=1170845) (professor)
 - Murilo de Lima Barros (aluno)
 
-## **Descrição do Projeto**  
+## **Descrição do Projeto**
 Este projeto desenvolve um sistema de logística autônoma em ambientes fechados utilizando drone DJI Tello equipado com câmera para identificar e navegar com instruções do usuário. Nossa solução busca otimizar tarefas de transporte de pequenos itens, monitoramento e inventário em escritórios, galpões e etc.
 
 ## **Funcionalidades de Chatbot e Controle**
-- **Chatbot Integrado:** permite interação natural (texto) com o sistema via interface Streamlit. O usuário digita comandos livres, o chatbot interpreta e gera o comando DJI Tello correspondente.
+- **Chatbot Integrado:** permite interação natural (texto) com o sistema via interface Tkinter. O usuário digita comandos livres, o chatbot interpreta e gera o comando DJI Tello correspondente.
 - **Processamento de Comandos:** uso de `process_ai_command` para validar e enfileirar instruções recebidas do chatbot, com feedback em tempo real.
 - **Interface Tkinter:** GUI para:
   - Visualizar vídeo ao vivo do drone
@@ -17,13 +17,12 @@ Este projeto desenvolve um sistema de logística autônoma em ambientes fechados
   - Logs de comandos e chat
 
 ## **Principais Funcionalidades em Desenvolvimento**
-- **Detecção de QR Codes:** OpenCV + PyZbar para leitura em tempo real.
-- **Chatbot-AI:** interpretação de linguagem natural para comandos do drone (por ex. “siga”, “pouse quando chegar”, “voe 50 cm para frente”).
+- **Chatbot-AI:** planejamento de rotas, gerenciamento de comandos periódicos.
 
 ## **Ferramentas Utilizadas**
 - **Hardware:** Drone DJI Tello
-- **Software:** Python, OpenCV, PyTello SDK, PyZbar, Tkinter
-- **IA & NLP:** Chatbot baseado em modelo de linguagem (Gemini)
+- **Software:** Python, OpenCV, Tkinter
+- **IA:** Chatbot baseado em modelo de linguagem (Gemini)
 
 ## **Instalação**
 ```bash
@@ -31,6 +30,7 @@ Este projeto desenvolve um sistema de logística autônoma em ambientes fechados
 git clone https://github.com/heltonmaia/proj_drone_tello.git
 cd proj_drone_tello
 ```
+
 ```bash
 # Instale dependências
 pip install -r requirements.txt
@@ -49,25 +49,8 @@ sudo apt-get install portaudio19-dev
    ```
 3. **Na UI**:
    - Visualize o vídeo ao vivo.
-   - Digite um comando manual ou conversacional na caixa de texto, ou grave um comando de voz com até 5 segundos.
+   - Digite um comando na caixa de texto, ou grave um comando de voz com até 5 segundos.
    - Clique em "Enviar" ou pressione a tecla Enter na caixa de texto
-
-## **Comandos Válidos via QR Code**
- O drone reconhece comandos via código QR, basta ele detectar o texto pela câmera.
-
-| Comando         | Descrição                    |
-|-----------------|------------------------------|
-| `takeoff`       | Decolar                      |
-| `land`          | Pousar                       |
-| `up`            | Subir x cm                   |
-| `down`          | Descer x cm                  |
-| `right`         | Mover-se à direita x cm      |
-| `left`          | Mover-se à esquerda x cm     |
-| `forward`       | Mover-se para frente x cm    |
-| `back`          | Mover-se para trás x cm      |
-| `follow`        | Seguir                       |
-
-(x é o passo, esse valor pode ser alterado na interface de usuário)
 
 ## **Demonstração**
 ### Interface de usuário
