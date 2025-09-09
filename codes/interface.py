@@ -7,6 +7,9 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 import sounddevice as sd
+import io
+import speech_recognition as sr
+from scipy.io.wavfile import write
 
 import modules.chatbot as chatbot
 import modules.tello_control as tello_control
@@ -47,7 +50,6 @@ class TelloGUI:
 
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
-        self.audio = None
         self.video_frame = None
         self.is_recording = False
         self.fps_counter = 0
@@ -264,26 +266,23 @@ class TelloGUI:
             return
 
         user_text = self.text_input_entry.get()
-        user_audio = self.audio
         frame = self.img_ai
 
         # Limpa os campos da UI imediatamente
         self.text_input_entry.delete(0, tk.END)
-        self.audio = None
 
         # Inicia a thread do Controlador de Missão
         threading.Thread(
             target=self._execute_ai_sequence,
-            args=(user_text, user_audio, frame),
+            args=(user_text, frame),
             daemon=True
         ).start()
 
-    def _execute_ai_sequence(self, user_text: str | None, user_audio: np.ndarray | None, initial_frame: Image.Image) -> None:
+    def _execute_ai_sequence(self, user_text: str, initial_frame: Image.Image) -> None:
         """
         Roda em uma thread e gerencia o loop de múltiplos passos.
         Args:
-            user_text (str | None): A entrada de texto do usuário.
-            user_audio (np.ndarray | None): A entrada de áudio do usuário.
+            user_text (str): A entrada de texto do usuário.
             initial_frame (Image.Image): O frame inicial da câmera.
         """
         self.is_sequence_running = True
@@ -295,20 +294,17 @@ class TelloGUI:
         
         try:
             for step in range(MAX_STEPS):
-                # Na primeira iteração, usa a entrada original do usuário. Nas seguintes, um prompt genérico.
-                prompt_text = user_text if step == 0 else f'Continue a rota com base na nova imagem. (Passo {step + 1}/{MAX_STEPS})'
-                audio_data = user_audio if step == 0 else None
-                
-                response, command, continue_route = chatbot.run_ai(prompt_text, audio_data, current_frame)
-                
-                # Atualiza o chat na UI
-                user_msg_display = user_text if (step == 0 and user_text) else ('Áudio' if user_audio else f'Passo {step + 1}')
+                prompt_text = user_text + f' (Passo {step + 1}/{MAX_STEPS})'
+                response, command, continue_route = chatbot.run_ai(prompt_text, current_frame, step)
+
+                user_msg_display = user_text if (step == 0 and user_text) else f'Passo {step + 1}'
                 self.root.after(0, self.update_chat_display, user_msg_display, response)
 
                 if command and chatbot.validate_command(command):
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
                 else:
+                    self.root.after(0, self.update_chat_display, user_msg_display, f"Comando inválido ou não reconhecido: '{command}'")
                     break
 
                 if not continue_route:
@@ -316,7 +312,6 @@ class TelloGUI:
                 
                 was_interrupted = self.abort_sequence_event.wait(5)
 
-                # Se o evento foi sinalizado (botão de abortar foi clicado)
                 if was_interrupted:
                     self.tello.send_cmd('stop') # Comando de segurança para parar o drone
                     break # Sai do loop imediatamente
@@ -435,22 +430,52 @@ class TelloGUI:
         self.response_label_user.config(text=f"Você: {user_msg}")
         self.response_label_ai.config(text=f"Drone: {ai_msg}")
 
-    def _record_audio(self) -> None:
-        """Função para gravar áudio em uma thread separada."""
+    def _transcribe_audio(self, audio_data: np.ndarray) -> str:
+        """Transcreve o áudio em uma thread para não bloquear a UI."""
+        recognizer = sr.Recognizer()
         try:
-            self.audio = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE),
-                                samplerate=SAMPLE_RATE,
-                                channels=1,
-                                dtype='int16')
+            mem_wav = io.BytesIO()
+            write(mem_wav, SAMPLE_RATE, audio_data)
+            mem_wav.seek(0)
+            with sr.AudioFile(mem_wav) as source:
+                audio_for_recognition = recognizer.record(source)
+            
+            transcribed_text = recognizer.recognize_google(audio_for_recognition, language='pt-BR') # type: ignore
+            print(f"Texto reconhecido: '{transcribed_text}'")
+            return transcribed_text
+        except sr.UnknownValueError:
+            return "Não foi possível entender o áudio."
+        except sr.RequestError:
+            return "Erro de conexão com o serviço de transcrição."
+        except Exception as e:
+            print(f"Erro inesperado na transcrição: {e}")
+            return "Erro ao processar o áudio."
+
+    def _record_audio(self) -> None:
+        """Grava e depois dispara a transcrição."""
+        try:
+            print(f"Gravando áudio por até {AUDIO_DURATION} segundos...")
+            audio_data = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE),
+                                samplerate=SAMPLE_RATE, channels=1, dtype='int16')
             sd.wait()
-            print("Gravação finalizada.")
+
+            # Mostra um status na UI
+            self.root.after(0, lambda: self.text_input_entry.insert(0, "Transcrevendo áudio..."))
+
+            # Transcreve o áudio
+            transcribed_text = self._transcribe_audio(audio_data)
+
+            # Atualiza a caixa de texto com o resultado
+            def update_entry():
+                self.text_input_entry.delete(0, tk.END)
+                self.text_input_entry.insert(0, transcribed_text)
+            
+            self.root.after(0, update_entry)
 
         except Exception as e:
-            print(f"Ocorreu um erro durante a gravação: {e}")
-            self.audio = None # Limpa o áudio em caso de erro
+            print(f"Ocorreu um erro durante o ciclo de gravação: {e}")
         finally:
             self.is_recording = False
-            
             self.root.after(0, self.reset_recording_buttons)
 
     def start_recording(self) -> None:
