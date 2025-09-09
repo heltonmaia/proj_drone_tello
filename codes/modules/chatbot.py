@@ -4,6 +4,7 @@ import numpy as np
 import traceback
 from scipy.io.wavfile import write
 import io
+import speech_recognition as sr
 
 from modules import utils
 from modules.tello_control import log_messages
@@ -31,7 +32,7 @@ def get_chat_session():
         print('Sessão de chat iniciada.')
     return chat_session
 
-def run_ai(text: str | None, audio: np.ndarray | None, frame: Image.Image) -> tuple[str, str | None, bool]:
+def run_ai(text: str | None, frame: Image.Image, step: int=0) -> tuple[str, str | None, bool]:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:
@@ -39,75 +40,69 @@ def run_ai(text: str | None, audio: np.ndarray | None, frame: Image.Image) -> tu
         audio (np.ndarray | None): Áudio do usuário.
         frame (Image.Image): Frame da câmera atual.
     Returns:
-        tuple: (resposta natural, comando técnico)
+        tuple: (resposta natural, comando técnico, continuar rota)
     """
 
     try:
         current_chat = get_chat_session()
-        content_for_turn = []
-        SAMPLE_RATE = 44100
+        
+        # O prompt não precisa mais da lógica de áudio.
+        user_text = text if text else 'Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura.'
 
-        # Garante que log_messages seja uma string formatada para o prompt
-        formatted_log_messages = ", ".join(log_messages) if log_messages and isinstance(log_messages, list) else 'Nenhum comando enviado anteriormente nesta sessão.'
+        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum comando enviado.'
 
-        if audio is not None:
-            print("Áudio detectado.")
-            
-            mem_wav = io.BytesIO()
-            write(mem_wav, SAMPLE_RATE, audio)
-            wav_data = mem_wav.getvalue()
+        if step == 0:
+            system_prompt = f"""
+                ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
 
-            # A API do Gemini espera um dicionário com 'mime_type' e 'data' para os "parts"
-            audio_part = {
-                "mime_type": "audio/wav",
-                "data": wav_data,
-            }
-            content_for_turn.append(audio_part)
-            
-            user_text = 'O objetivo principal foi fornecido por áudio. Analise o arquivo de áudio anexado e use-o como o principal objetivo para esta interação.'
+                Contexto:
+                - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
+                - Comandos disponíveis: {COMMAND_LIST}
+
+                Objetivo Principal:
+                {user_text}
+
+                Instruções de Raciocínio Passo a Passo:
+                1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
+                2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
+                3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
+                4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
+                5.  Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+
+                Exemplo de Raciocínio para "vá para a mesa":
+                [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
+                [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
+                [DECISÃO] ccw 90
+                [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
+                [CONTINUA]
+
+                Formato Obrigatório da Resposta:
+                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
+                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
+                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                [JUSTIFICATIVA] Explicação da sua decisão.
+                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                """
         else:
-            # Se não houver áudio, usa a lógica de texto
-            user_text = text if text else 'Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura, sem comandos de movimento'
-
-        system_prompt = f"""
-            ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
-
-            Contexto:
-            - Você é um sistema de IA avançado controlando um drone Tello em um ambiente interno.
-            - Sua tarefa é analisar a imagem da câmera do drone e um objetivo fornecido (por texto ou áudio) para gerar o próximo comando de voo.
-            - Histórico de comandos enviados ao drone nesta sessão: {formatted_log_messages}
-            - Comandos de voo disponíveis: {COMMAND_LIST}
-            - Unidades: Distâncias em cm, rotações em graus.
-
-            Objetivo Principal para esta interação:
-            {user_text}
-
-            Instruções Detalhadas:
-            1.  Analise cuidadosamente a imagem fornecida, que representa a visão atual do drone.
-            2.  Identifique obstáculos, alvos, ou condições relevantes para o objetivo principal.
-            3.  Com base na análise, no objetivo, e no histórico de comandos, decida a próxima ação.
-            4.  Gere um comando técnico da lista de comandos disponíveis.
-                - Para movimentos (up, down, left, right, forward, back), SEMPRE inclua a distância em cm (geralmente entre 20-500 cm). Ex: 'forward 30'.
-                - Para rotações (cw, ccw), SEMPRE inclua os graus (entre 1-360 graus). Ex: 'ccw 45'.
-                - 'takeoff' e 'land' não necessitam de parâmetros numéricos.
-            5.  Forneça uma justificativa para sua decisão, explicando como ela contribui para o objetivo ou para a segurança.
-            6.  Se nenhum comando for apropriado ou seguro no momento, ou se o objetivo parecer satisfeito com base na cena (como: "descreva a imagem"), o comando deve ser "nenhum comando necessário".
-            7.  Caso o objetivo não possa ser cumprido com um único movimento, sinalize que a rota deve continuar da seguinte forma: adicione o marcador "[CONTINUA]", isso inicia o processo de comandos compostos. Priorize movimentos simples, sem continuação.
-            8.  Caso nenhum comando seja necessário, não deve ter continuação de rota.
-            9.  Em comandos compostos, evite fazer movimentos para direções fora de seu campo de visão. Primeiro avalie a cena.
-
-            Formato Obrigatório da Resposta:
-            [ANÁLISE] Descrição da cena.
-            [DECISÃO] O comando técnico exato.
-            [JUSTIFICATIVA] Explicação da decisão.
-            [CONTINUA] Caso seja necessário continuar a trajetória. Caso contrário, omita esta linha.
-            """
+            system_prompt = f"""
+                CONTINUAÇÃO DE COMANDO
+                Você sinalizou que sua tarefa não estava completa. Continue seu raciocínio e planejamento com base na imagem atual.
+                Lembre-se de revisar o 'Objetivo Principal' e ajustar seu plano conforme necessário.
+                Objetivo Principal:
+                {user_text}
+                Comandos enviados até agora: {formatted_log_messages}
+                Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
+                Formato Obrigatório da Resposta:
+                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
+                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
+                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                [JUSTIFICATIVA] Explicação da sua decisão.
+                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                """
 
         # Constrói o prompt para o turno atual.
-        content_for_turn.insert(0, system_prompt)
+        content_for_turn = [system_prompt, frame]
         
-        content_for_turn.append(frame)
-
         # Envia a mensagem para a sessão de chat ativa
         response = current_chat.send_message(content_for_turn)
 
