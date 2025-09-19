@@ -28,7 +28,7 @@ class TelloGUI:
 
         # Configurações de estilo
         self.root.configure(bg=BG_COLOR)
-        self.root.geometry("1200x1000")
+        self.root.geometry("1300x1000")
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure('TFrame', background=BG_COLOR)
@@ -51,14 +51,14 @@ class TelloGUI:
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
-        self.is_recording = False
         self.fps_counter = 0
         self.video_size = (800, 600)
         self.tello.set_image_size(self.video_size)
         self.last_time_fps = time.time()
         self.fps = 0 # FPS calculado
         self.is_sequence_running = False
-        self.max_steps = "5"
+        self.max_steps = "7"
+        self.drone_height = 0 # cm
         self.abort_sequence_event = threading.Event()
 
         # Configurações de layout da janela
@@ -69,11 +69,11 @@ class TelloGUI:
         # Frame principal para o vídeo e chat
         main_frame = ttk.Frame(self.root)
         main_frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        main_frame.rowconfigure(0, weight=1, minsize=500)
-        main_frame.rowconfigure(1, weight=0)
+        main_frame.rowconfigure(0, weight=5)
+        main_frame.rowconfigure(1, weight=1)
         main_frame.columnconfigure(0, weight=1)
 
-        # Frame da esquerda para controles e parâmetros
+        # Frame da direita para controles e parâmetros
         right_frame = ttk.Frame(self.root)
         right_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         right_frame.rowconfigure(0, weight=1)
@@ -86,7 +86,7 @@ class TelloGUI:
 
         # Container para chat
         chat_frame = ttk.Frame(main_frame)
-        chat_frame.grid(row=1, column=0, sticky="sew", pady=(10, 0))
+        chat_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         chat_frame.columnconfigure(0, weight=1)
         self._create_chat_widgets(chat_frame)
 
@@ -107,11 +107,32 @@ class TelloGUI:
         Args:
             container (ttk.Frame): Frame onde os widgets do chat serão colocados.
         """
+        container.rowconfigure(0, weight=0)
+        container.rowconfigure(1, weight=1)
+        container.rowconfigure(2, weight=0)
         # Display da resposta
         self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 12), wraplength=800, justify="left")
         self.response_label_user.grid(row=0, column=0, sticky="sew", pady=(0, 5))
-        self.response_label_ai = ttk.Label(container, text="", font=("Ubuntu", 12), justify="left", wraplength=800) # wraplength quebra a linha
-        self.response_label_ai.grid(row=1, column=0, sticky="sew", pady=(0, 5))
+        self.ai_response_frame = ttk.Frame(container)
+        self.ai_response_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
+        self.ai_response_frame.rowconfigure(0, weight=1)
+        self.ai_response_frame.columnconfigure(0, weight=1)
+        self.response_text_ai = tk.Text(
+            self.ai_response_frame,
+            wrap="word",
+            height=12,
+            state="disabled", # Começa como somente leitura
+            font=("Ubuntu", 12),
+            bg=LBF_COLOR,
+            fg=TEXT_COLOR,
+            borderwidth=0,
+            highlightthickness=0
+        )
+        self.response_text_ai.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(self.ai_response_frame, command=self.response_text_ai.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.response_text_ai.config(yscrollcommand=scrollbar.set)
 
         # Texto
         input_frame = ttk.Frame(container)
@@ -202,19 +223,14 @@ class TelloGUI:
             
             try:
                 img = Image.open(icon_path).resize((30, 30), Image.Resampling.LANCZOS)
-                
                 photo_image = ImageTk.PhotoImage(img)
                 self.param_icons[key] = photo_image
-                
                 icon_label = ttk.Label(row_frame, image=self.param_icons[key])
-                
                 icon_label.pack(side="left", padx=(0, 10))
 
             except FileNotFoundError:
-                # Se o arquivo não for encontrado, agora veremos um erro claro no terminal!
                 print(f"ERRO DE ARQUIVO: Ícone não encontrado no caminho: '{icon_path}'")
             except Exception as e:
-                # Pega qualquer outro erro que possa ocorrer ao carregar a imagem
                 print(f"ERRO AO CARREGAR IMAGEM: '{icon_path}'. Detalhes: {e}")
 
             value_label = ttk.Label(row_frame, text=f"N/A {unit}", font=("Ubuntu", 11, "bold"))
@@ -243,24 +259,21 @@ class TelloGUI:
         messagebox.showinfo(title, message)
 
     def update_max_steps(self) -> None:
-        """Atualiza o passo do drone com o valor inserido pelo usuário."""
+        """Atualiza o número máximo de passos que uma sequência de comandos pode ter"""
         new_max_steps = self.max_steps_input.get()
         if new_max_steps.isdigit():
             self.max_steps = int(new_max_steps)
             print(f"Número máximos de passos atualizado para: {self.max_steps}")
 
     def clear_logs(self) -> None:
-        """Limpa o log de comandos e a lista de mensagens."""
+        """Limpa o log de comandos"""
         self.command_log.clear()
         tello_control.log_messages.clear()
         self.log_listbox.delete(0, tk.END)
         print("Logs limpos.")
 
     def send_ai_command(self) -> None:
-        """
-        Prepara e inicia a sequência de comandos da IA em uma thread gerenciadora.
-        """
-        # Se uma sequência já estiver rodando, impede uma nova.
+        """Prepara e inicia a sequência de comandos da IA em uma thread gerenciadora."""
         if self.is_sequence_running:
             print("Aviso: Sequência de IA já em andamento.")
             return
@@ -268,10 +281,8 @@ class TelloGUI:
         user_text = self.text_input_entry.get()
         frame = self.img_ai
 
-        # Limpa os campos da UI imediatamente
-        self.text_input_entry.delete(0, tk.END)
+        self.text_input_entry.delete(0, tk.END) # Limpa a caixa de entrada de texto
 
-        # Inicia a thread do Controlador de Missão
         threading.Thread(
             target=self._execute_ai_sequence,
             args=(user_text, frame),
@@ -294,17 +305,22 @@ class TelloGUI:
         
         try:
             for step in range(MAX_STEPS):
-                prompt_text = user_text + f' (Passo {step + 1}/{MAX_STEPS})'
-                response, command, continue_route = chatbot.run_ai(prompt_text, current_frame, step)
+                prompt_text = user_text + f' (Passo {step + 1}, Máx: {MAX_STEPS})'
+                response, command, continue_route = chatbot.run_ai(
+                    prompt_text,
+                    current_frame,
+                    step,
+                    self.drone_height
+                )
 
-                user_msg_display = user_text if (step == 0 and user_text) else f'Passo {step + 1}'
+                user_msg_display = user_text if (step == 0 and user_text) else f'Sequência de comandos, passo {step + 1}'
                 self.root.after(0, self.update_chat_display, user_msg_display, response)
 
                 if command and chatbot.validate_command(command):
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
                 else:
-                    self.root.after(0, self.update_chat_display, user_msg_display, f"Comando inválido ou não reconhecido: '{command}'")
+                    self.root.after(0, self.update_chat_display, user_msg_display, f"Sequência finalizada")
                     break
 
                 if not continue_route:
@@ -313,14 +329,11 @@ class TelloGUI:
                 was_interrupted = self.abort_sequence_event.wait(5)
 
                 if was_interrupted:
-                    self.tello.send_cmd('stop') # Comando de segurança para parar o drone
+                    #self.tello.send_cmd('stop') # Comando de segurança para parar o drone
                     break # Sai do loop imediatamente
                 
                 # Captura um novo frame para a próxima iteração
-                frame_bgr = self.tello.get_frame()
-                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                # frame_rgb = self.webcam.read()[1]
-                current_frame = Image.fromarray(frame_rgb)
+                current_frame = self.img_ai
 
         except Exception as e:
             print(f"Erro crítico durante a execução da sequência: {e}")
@@ -382,12 +395,12 @@ class TelloGUI:
         int_fps = int(self.fps)
 
         stats = self.tello.get_info()
-        bat, height, temph, pres, time_elapsed = stats
+        bat, self.drone_height, temph, pres, time_elapsed = stats
 
         # Atualiza os labels
         self._update_param_label('fps', int_fps)
         self._update_param_label('battery', bat)
-        self._update_param_label('height', height)
+        self._update_param_label('height', self.drone_height) if self.drone_height is not None else self._update_param_label('height', 10)
         self._update_param_label('temp', temph)
         self._update_param_label('pres', pres)
         self._update_param_label('time', time_elapsed)
@@ -422,16 +435,23 @@ class TelloGUI:
 
     def update_chat_display(self, user_msg: str, ai_msg: str) -> None:
         """
-        Atualiza os labels do chat.
-        Args:
-            user_msg (str): A mensagem do usuário.
-            ai_msg (str): A mensagem do drone.
+        Atualiza os labels do chat, agora usando um widget Text para a resposta da IA.
         """
         self.response_label_user.config(text=f"Você: {user_msg}")
-        self.response_label_ai.config(text=f"Drone: {ai_msg}")
+
+        self.response_text_ai.config(state="normal")
+        self.response_text_ai.delete("1.0", tk.END)
+        self.response_text_ai.insert(tk.END, f"Drone: {ai_msg}")
+        self.response_text_ai.config(state="disabled")
+        self.response_text_ai.see(tk.END)
 
     def _transcribe_audio(self, audio_data: np.ndarray) -> str:
-        """Transcreve o áudio em uma thread para não bloquear a UI."""
+        """Transcreve o áudio gravado para texto.
+        Args:
+            audio_data (np.ndarray): O áudio gravado.
+        Returns:
+            str: O texto transcrito.
+        """
         recognizer = sr.Recognizer()
         try:
             mem_wav = io.BytesIO()
@@ -441,6 +461,7 @@ class TelloGUI:
                 audio_for_recognition = recognizer.record(source)
             
             transcribed_text = recognizer.recognize_google(audio_for_recognition, language='pt-BR') # type: ignore
+            # transcribed_text = recognizer.recognize_sphinx(audio_for_recognition, language='pt-BR') # type: ignore
             print(f"Texto reconhecido: '{transcribed_text}'")
             return transcribed_text
         except sr.UnknownValueError:
@@ -452,20 +473,15 @@ class TelloGUI:
             return "Erro ao processar o áudio."
 
     def _record_audio(self) -> None:
-        """Grava e depois dispara a transcrição."""
+        """Grava e depois dispara a transcrição em uma thread."""
         try:
             print(f"Gravando áudio por até {AUDIO_DURATION} segundos...")
-            audio_data = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE),
-                                samplerate=SAMPLE_RATE, channels=1, dtype='int16')
+            audio_data = sd.rec(int(AUDIO_DURATION * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype='int16')
             sd.wait()
 
-            # Mostra um status na UI
             self.root.after(0, lambda: self.text_input_entry.insert(0, "Transcrevendo áudio..."))
-
-            # Transcreve o áudio
             transcribed_text = self._transcribe_audio(audio_data)
 
-            # Atualiza a caixa de texto com o resultado
             def update_entry():
                 self.text_input_entry.delete(0, tk.END)
                 self.text_input_entry.insert(0, transcribed_text)
@@ -475,12 +491,10 @@ class TelloGUI:
         except Exception as e:
             print(f"Ocorreu um erro durante o ciclo de gravação: {e}")
         finally:
-            self.is_recording = False
             self.root.after(0, self.reset_recording_buttons)
 
     def start_recording(self) -> None:
         """Inicia a gravação de áudio."""
-        self.is_recording = True
         self.start_record_button.config(state="disabled", text=f"Gravando...({AUDIO_DURATION}s)")
         self.stop_record_button.config(state="normal")
         threading.Thread(target=self._record_audio, daemon=True).start()
