@@ -1,10 +1,6 @@
 import google.generativeai as genai
 from PIL import Image
-import numpy as np
 import traceback
-from scipy.io.wavfile import write
-import io
-import speech_recognition as sr
 
 from modules import utils
 from modules.tello_control import log_messages
@@ -32,13 +28,14 @@ def get_chat_session():
         print('Sessão de chat iniciada.')
     return chat_session
 
-def run_ai(text: str | None, frame: Image.Image, step: int=0) -> tuple[str, str | None, bool]:
+def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
     """
     Executa a IA para gerar comandos de controle do drone.
     Args:
         text (str | None): Descrição do que o drone deve fazer.
-        audio (np.ndarray | None): Áudio do usuário.
         frame (Image.Image): Frame da câmera atual.
+        step (int): Passo atual na sequência de comandos.
+        height (int): Altura atual do drone em cm.
     Returns:
         tuple: (resposta natural, comando técnico, continuar rota)
     """
@@ -46,18 +43,19 @@ def run_ai(text: str | None, frame: Image.Image, step: int=0) -> tuple[str, str 
     try:
         current_chat = get_chat_session()
         
-        # O prompt não precisa mais da lógica de áudio.
         user_text = text if text else 'Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura.'
 
         formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum comando enviado.'
 
         if step == 0:
             system_prompt = f"""
-                ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
+                ANÁLISE DE CENA E COMANDO PARA DRONE
 
                 Contexto:
                 - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
                 - Comandos disponíveis: {COMMAND_LIST}
+                - Comandos enviados até agora: {formatted_log_messages}
+                - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
 
                 Objetivo Principal:
                 {user_text}
@@ -67,7 +65,10 @@ def run_ai(text: str | None, frame: Image.Image, step: int=0) -> tuple[str, str 
                 2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
                 3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
                 4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
-                5.  Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+                Obs:
+                1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
+                2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+                3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
 
                 Exemplo de Raciocínio para "vá para a mesa":
                 [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
@@ -91,6 +92,7 @@ def run_ai(text: str | None, frame: Image.Image, step: int=0) -> tuple[str, str 
                 Objetivo Principal:
                 {user_text}
                 Comandos enviados até agora: {formatted_log_messages}
+                Altura: {height} cm.
                 Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
                 Formato Obrigatório da Resposta:
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
@@ -167,7 +169,7 @@ def validate_command(cmd: str) -> bool:
             if base_cmd in ['cw', 'ccw']: # Rotação em graus
                 if not (1 <= val <= 360): return False
             else: # Movimento em cm
-                if not (20 <= val <= 500): return False
+                if not (10 <= val <= 500): return False
         except ValueError:
             return False # Não é um número inteiro
     # Comandos que não requerem argumento numérico
