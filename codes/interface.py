@@ -320,7 +320,6 @@ class TelloGUI:
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
                 else:
-                    self.root.after(0, self.update_chat_display, user_msg_display, f"Sequência finalizada")
                     break
 
                 if not continue_route:
