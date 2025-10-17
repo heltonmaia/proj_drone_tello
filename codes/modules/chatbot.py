@@ -1,6 +1,8 @@
 import google.generativeai as genai
 from PIL import Image
 import traceback
+import ollama
+import io
 
 from modules import utils
 from modules.tello_control import log_messages
@@ -27,6 +29,118 @@ def get_chat_session():
         chat_session = model.start_chat(history=[])
         print('Sessão de chat iniciada.')
     return chat_session
+
+def pil_image_to_bytes(image: Image.Image) -> bytes:
+    """Converte um objeto de imagem PIL para bytes no formato PNG."""
+    with io.BytesIO() as buffer:
+        image.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+def run_ai_local(text: str | None, frame: Image.Image,step: int=0, height: int=0) -> tuple[str, str | None, bool]:
+    """
+    Executa a IA LOCALMENTE com Ollama para gerar comandos.
+    """
+    try:
+        # A lógica de áudio é removida por simplicidade,
+        # pois o objetivo é focar na interação local com texto e imagem.
+        user_text = text if text else 'Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura.'
+
+        # A construção do system_prompt continua a mesma!
+        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum comando enviado.'
+        if step == 0:
+            system_prompt = f"""
+                ANÁLISE DE CENA E COMANDO PARA DRONE
+
+                    Contexto:
+                    - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
+                    - Comandos disponíveis: {COMMAND_LIST}
+                    - Comandos enviados até agora: {formatted_log_messages}
+                    - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
+
+                    Objetivo Principal:
+                    {user_text}
+
+                    Instruções de Raciocínio Passo a Passo:
+                    1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
+                    2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
+                    3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
+                    4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
+                    Obs:
+                    1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
+                    2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+                    3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
+
+                    Exemplo de Raciocínio para "vá para a mesa":
+                    [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
+                    [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
+                    [DECISÃO] ccw 90
+                    [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
+                    [CONTINUA]
+
+                    Formato Obrigatório da Resposta:
+                    [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
+                    [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
+                    [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                    [JUSTIFICATIVA] Explicação da sua decisão.
+                    [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                """
+        else:
+            system_prompt = f"""
+                CONTINUAÇÃO DE COMANDO
+                Você sinalizou que sua tarefa não estava completa. Continue seu raciocínio e planejamento com base na imagem atual.
+                Lembre-se de revisar o 'Objetivo Principal' e ajustar seu plano conforme necessário.
+                Objetivo Principal:
+                {user_text}
+                Comandos enviados até agora: {formatted_log_messages}
+                Altura: {height} cm.
+                Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
+                Formato Obrigatório da Resposta:
+                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
+                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
+                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                [JUSTIFICATIVA] Explicação da sua decisão.
+                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                """
+
+        print("Enviando prompt para o modelo Gemma local...")
+        
+        response = ollama.chat(
+            model='gemma:2b', # Especifica o modelo que baixamos
+            messages=[
+                {
+                    'role': 'user',
+                    'content': system_prompt, # O prompt de texto
+                    'images': [pil_image_to_bytes(frame)] # A imagem, convertida para bytes
+                }
+            ]
+        )
+
+        # A extração da resposta do Ollama é um pouco diferente
+        natural_response_text = response['message']['content']
+        
+        # A lógica de extração do comando e da flag [CONTINUA] é a mesma
+        extracted_command = None
+        continue_route = False
+        
+        # Extração do comando
+        for line in natural_response_text.split('\n'):
+            if line.startswith('[DECISÃO]'):
+                command_text = line.replace('[DECISÃO]', '').strip()
+                if command_text.lower() == 'nenhum comando necessário' or not command_text:
+                    extracted_command = None
+                else:
+                    extracted_command = command_text
+                continue
+            
+            elif line.startswith('[CONTINUA]'):
+                continue_route = True
+        
+        return natural_response_text, extracted_command, continue_route
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        print(f"DEBUG: Erro em run_ai_local: {str(e)}\n{error_details}")
+        return f"Erro crítico ao processar com IA local: {str(e)}", None, False
 
 def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
     """
