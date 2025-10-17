@@ -47,60 +47,43 @@ def run_ai_local(text: str | None, frame: Image.Image,step: int=0, height: int=0
 
         # A construção do system_prompt continua a mesma!
         formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum comando enviado.'
-        if step == 0:
-            system_prompt = f"""
-                ANÁLISE DE CENA E COMANDO PARA DRONE
+        system_prompt = f"""
+            ANÁLISE DE CENA E COMANDO PARA DRONE
 
-                    Contexto:
-                    - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
-                    - Comandos disponíveis: {COMMAND_LIST}
-                    - Comandos enviados até agora: {formatted_log_messages}
-                    - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
+                Contexto:
+                - Você é um sistema de IA avançado controlando um drone Tello.
+                - Passo atual da sequência: {step + 1}.
+                - Comandos disponíveis: {COMMAND_LIST}
+                - Comandos enviados até agora nesta sequência: {formatted_log_messages}
+                - Altura do drone: {height} cm.
 
-                    Objetivo Principal:
-                    {user_text}
-
-                    Instruções de Raciocínio Passo a Passo:
-                    1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
-                    2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
-                    3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
-                    4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
-                    Obs:
-                    1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
-                    2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
-                    3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
-
-                    Exemplo de Raciocínio para "vá para a mesa":
-                    [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
-                    [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
-                    [DECISÃO] ccw 90
-                    [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
-                    [CONTINUA]
-
-                    Formato Obrigatório da Resposta:
-                    [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-                    [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                    [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                    [JUSTIFICATIVA] Explicação da sua decisão.
-                    [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
-                """
-        else:
-            system_prompt = f"""
-                CONTINUAÇÃO DE COMANDO
-                Você sinalizou que sua tarefa não estava completa. Continue seu raciocínio e planejamento com base na imagem atual.
-                Lembre-se de revisar o 'Objetivo Principal' e ajustar seu plano conforme necessário.
                 Objetivo Principal:
                 {user_text}
-                Comandos enviados até agora: {formatted_log_messages}
-                Altura: {height} cm.
-                Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
+
+                Instruções de Raciocínio Passo a Passo:
+                1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
+                2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
+                3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
+                4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
+                Obs:
+                1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
+                2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+                3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
+
+                Exemplo de Raciocínio para "vá para a mesa":
+                [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
+                [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
+                [DECISÃO] ccw 90
+                [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
+                [CONTINUA]
+
                 Formato Obrigatório da Resposta:
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
                 [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
                 [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
                 [JUSTIFICATIVA] Explicação da sua decisão.
                 [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
-                """
+            """
 
         print("Enviando prompt para o modelo Gemma local...")
         
