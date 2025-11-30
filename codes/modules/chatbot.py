@@ -81,15 +81,15 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
             - System: takeoff, land
 
             EXAMPLES:
-            User: "Got to the door"
+            User: "Go to the door"
             Image: Open door ahead.
             [ANALYSIS] I see an open door in front of me. Path is clear.
             [DECISION] forward 100
             [CONTINUE]
-
-            User: "Land now"
-            Image: Any.
-            [ANALYSIS] User requested landing.
+            
+            User: "OBJECTIVE: Go to the door. PREVIOUS ACTION RESULT: I've reached the door safely. What now?"
+            Image: Reached the door.
+            [ANALYSIS] I am at the door. No obstacles around.
             [DECISION] land
             """
         
