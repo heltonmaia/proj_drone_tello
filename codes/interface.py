@@ -303,9 +303,17 @@ class TelloGUI:
         MAX_STEPS = int(self.max_steps)
         current_frame = initial_frame
         
+        # Contexto persistente
+        context_memory = "Starting mission."
+
         try:
             for step in range(MAX_STEPS):
-                prompt_text = user_text + f' (Passo {step + 1}, Máx: {MAX_STEPS})'
+                # Injeta a memória no prompt
+                if step == 0:
+                    prompt_text = user_text
+                else:
+                    prompt_text = f"OBJECTIVE: {user_text}. PREVIOUS ACTION RESULT: {context_memory}. What now?"
+
                 response, command, continue_route = chatbot.run_ai(
                     prompt_text,
                     current_frame,
@@ -313,32 +321,39 @@ class TelloGUI:
                     self.drone_height
                 )
 
-                user_msg_display = user_text if (step == 0 and user_text) else f'Sequência de comandos, passo {step + 1}'
-                self.root.after(0, self.update_chat_display, user_msg_display, response)
+                # Atualiza a UI
+                self.root.after(0, self.update_chat_display, f"Passo {step+1}", response)
+
+                if "[ANALYSIS]" in response:
+                    try:
+                        context_memory = response.split("[ANALYSIS]")[1].split("[")[0].strip()
+                    except:
+                        context_memory = response[:100]
+                else:
+                     context_memory = response[:50]
 
                 if command and chatbot.validate_command(command):
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
                 else:
-                    break
+                    print(f"Sem comando válido no passo {step}.")
+                    if not continue_route: break
 
                 if not continue_route:
                     break
                 
-                was_interrupted = self.abort_sequence_event.wait(5)
-
-                if was_interrupted:
-                    #self.tello.send_cmd('stop') # Comando de segurança para parar o drone
-                    break # Sai do loop imediatamente
+                was_interrupted = self.abort_sequence_event.wait(6)
                 
-                # Captura um novo frame para a próxima iteração
+                if was_interrupted:
+                    break
+                
                 current_frame = self.img_ai
 
         except Exception as e:
-            print(f"Erro crítico durante a execução da sequência: {e}")
+            print(f"Erro seq: {e}")
         finally:
             self.is_sequence_running = False
-            self.root.after(0, self._set_ui_for_sequence, False) # Reabilita a UI
+            self.root.after(0, self._set_ui_for_sequence, False)
 
     def _set_ui_for_sequence(self, is_running: bool) -> None:
         """

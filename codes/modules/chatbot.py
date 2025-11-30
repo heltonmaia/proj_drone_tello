@@ -8,7 +8,7 @@ from modules import utils
 from modules.tello_control import log_messages
 
 USE_LOCAL_AI = True
-LOCAL_MODEL_NAME = 'llama3.2-vision'
+LOCAL_MODEL_NAME = 'gemma3:4b'
 API_MODEL_NAME = 'gemini-1.5-flash'
 
 utils.configure_generative_ai()
@@ -48,7 +48,7 @@ def pil_image_to_bytes(image: Image.Image) -> bytes:
 
 def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
     """
-    Executa a IA LOCALMENTE com Ollama.
+    Executa a IA localmente com Ollama.
     Args:
         text (str | None): Descrição do que o drone deve fazer.
         frame (Image.Image): Frame da câmera do drone.
@@ -58,47 +58,40 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
         tuple: (resposta natural, comando técnico, continuar rota)
     """
     try:
-        user_text = text if text else 'Nenhum objetivo. Descreva e aja.'
+        user_text = text if text else 'No objective provided. Analyze the scene'
         formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum.'
 
         system_prompt = f"""
-            ANÁLISE DE CENA E COMANDO PARA DRONE
+            You are a drone pilot AI controlling a Tello Drone.
+            CURRENT GOAL: "{user_text}"
+            HISTORY: {formatted_log_messages}
 
-            Contexto:
-            - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo dado por uma entrada de texto.
-            - Comandos disponíveis: {COMMAND_LIST}
-            - Comandos enviados até agora: {formatted_log_messages}
-            - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
+            INSTRUCTIONS:
+            1. Analyze the image to find obstacles or targets related to the GOAL.
+            2. Plan the next move safely.
+            3. OUTPUT FORMAT (Strictly followed):
 
-            Entrada do Usuário:
-            {user_text}
+            [ANALYSIS] Brief visual description in English.
+            [DECISION] command value
+            [CONTINUE] (Optional tag if route is not finished)
 
-            Instruções de Raciocínio Passo a Passo:
-            1.  Observar: Analise a imagem atual. Onde estão os obstáculos?
-            2.  Orientar: Compare sua observação com a 'Entrada do Usuário'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
-            3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
-            4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
-            Obs:
-            1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
-            2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
-            3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
+            AVAILABLE COMMANDS:
+            - Movement (cm): forward, back, left, right, up, down (val: 20-500)
+            - Rotation (deg): cw, ccw (val: 1-360)
+            - System: takeoff, land
 
-            Exemplo de Raciocínio para "vá para a mesa":
-            [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
-            [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
-            [DECISÃO] ccw 90
-            [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
-            [CONTINUA]
+            EXAMPLES:
+            User: "Got to the door"
+            Image: Open door ahead.
+            [ANALYSIS] I see an open door in front of me. Path is clear.
+            [DECISION] forward 100
+            [CONTINUE]
 
-            Formato Obrigatório da Resposta:
-            [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-            [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-            [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-            [JUSTIFICATIVA] Explicação da sua decisão.
-            [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+            User: "Land now"
+            Image: Any.
+            [ANALYSIS] User requested landing.
+            [DECISION] land
             """
-
-        print(f"Processando localmente com {LOCAL_MODEL_NAME} (Step {step})...")
         
         stream = ollama.chat(
             model=LOCAL_MODEL_NAME,
@@ -113,28 +106,36 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
         )
 
         full_response_text = ""
-        print("AI Response: ", end="", flush=True)
 
         for chunk in stream:
             part = chunk['message']['content']
-            print(part, end="", flush=True)
             full_response_text += part
 
         extracted_command = None
         continue_route = False
         
-        for line in full_response_text.split('\n'):
+        lines = full_response_text.split('\n')
+        for line in lines:
             line = line.strip()
-            if '[DECISÃO]' in line.upper():
-                # Tenta limpar o texto para pegar só o comando
+            # Ignora linhas de raciocínio para pegar o comando
+            if 'DECISION' in line.upper():
                 parts = line.split(']')
                 if len(parts) > 1:
-                    command_candidate = parts[1].strip()
-                    if validate_command(command_candidate):
-                        extracted_command = command_candidate
+                    cmd = parts[1].strip().replace(':', '').strip() # Limpa dois pontos extras
+                    if validate_command(cmd):
+                        extracted_command = cmd
             
-            elif '[CONTINUA]' in line.upper():
+            if 'CONTINUE' in line.upper():
                 continue_route = True
+        
+        # Fallback de segurança: Se a IA local falhar a formatação mas escrever o comando
+        if not extracted_command:
+             for line in lines:
+                 for valid_cmd in COMMAND_LIST:
+                     if line.lower().startswith(valid_cmd):
+                         if validate_command(line):
+                             extracted_command = line
+                             break
 
         return full_response_text, extracted_command, continue_route
 
@@ -189,14 +190,12 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
                 [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
                 [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
                 [DECISÃO] ccw 90
-                [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
                 [CONTINUA]
 
                 Formato Obrigatório da Resposta:
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
                 [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
                 [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [JUSTIFICATIVA] Explicação da sua decisão.
                 [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
                 """
         else:
@@ -213,7 +212,6 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
                 [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
                 [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [JUSTIFICATIVA] Explicação da sua decisão.
                 [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
                 """
 
