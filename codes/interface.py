@@ -49,7 +49,7 @@ class TelloGUI:
             return
 
         self.command_log = tello_control.log_messages
-        self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        #self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
@@ -165,7 +165,7 @@ class TelloGUI:
         self.takeoff_button.pack(fill="x", padx=5, pady=2)
         self.land_button = ttk.Button(sidebar_frame, text="Pousar", command=self.land)
         self.land_button.pack(fill="x", padx=5, pady=2)
-        self.finish_button = ttk.Button(sidebar_frame, text="Encerrar Drone", command=self._exit)
+        self.finish_button = ttk.Button(sidebar_frame, text="Fechar", command=self._exit)
         self.finish_button.pack(fill="x", padx=5, pady=2)
         self.emergency_button = ttk.Button(sidebar_frame, text="Emergência", command=self.emergency_stop)
         self.emergency_button.pack(fill="x", padx=5, pady=5)
@@ -185,7 +185,7 @@ class TelloGUI:
 
         log_frame = ttk.Frame(sidebar_frame)
         log_frame.pack(fill='both', expand=True, padx=5, pady=5)
-        ttk.Label(log_frame, text="Log de Comandos").pack(anchor="w")
+        ttk.Label(log_frame, text="Log").pack(anchor="w")
         
         self.log_listbox = tk.Listbox(log_frame, height=10)
         self.log_listbox.pack(fill='both', expand=True, side='left')
@@ -194,7 +194,7 @@ class TelloGUI:
         scrollbar.pack(side='right', fill='y')
         self.log_listbox.config(yscrollcommand=scrollbar.set)
         
-        ttk.Button(sidebar_frame, text="Limpar Logs", command=self.clear_logs).pack(fill='x', padx=5, pady=5)
+        ttk.Button(sidebar_frame, text="Limpar Log", command=self.clear_logs).pack(fill='x', padx=5, pady=5)
 
     def _create_params_widgets(self, container: ttk.Frame) -> None:
         """
@@ -304,7 +304,7 @@ class TelloGUI:
         current_frame = initial_frame
         
         # Contexto persistente
-        context_memory = "Starting mission."
+        context_memory = ""
 
         try:
             for step in range(MAX_STEPS):
@@ -312,7 +312,7 @@ class TelloGUI:
                 if step == 0:
                     prompt_text = user_text
                 else:
-                    prompt_text = f"OBJECTIVE: {user_text}. PREVIOUS ACTION RESULT: {context_memory}. What now?"
+                    prompt_text = f"{user_text}. ANÁLISE DA AÇÃO ANTERIOR: {context_memory}"
 
                 response, command, continue_route = chatbot.run_ai(
                     prompt_text,
@@ -322,11 +322,11 @@ class TelloGUI:
                 )
 
                 # Atualiza a UI
-                self.root.after(0, self.update_chat_display, f"Passo {step+1}", response)
+                self.root.after(0, self.update_chat_display, f"Step {step+1}", response)
 
-                if "[ANALYSIS]" in response:
+                if "[ANÁLISE]" in response:
                     try:
-                        context_memory = response.split("[ANALYSIS]")[1].split("[")[0].strip()
+                        context_memory = response.split("[ANÁLISE]")[1].split("[")[0].strip()
                     except:
                         context_memory = response[:100]
                 else:

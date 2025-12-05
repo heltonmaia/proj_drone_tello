@@ -1,4 +1,5 @@
 import google.generativeai as genai
+from google.generativeai.types import GenerationConfig
 from PIL import Image
 import traceback
 import ollama
@@ -7,12 +8,23 @@ import io
 from modules import utils
 from modules.tello_control import log_messages
 
-USE_LOCAL_AI = True
-LOCAL_MODEL_NAME = 'gemma3:4b'
-API_MODEL_NAME = 'gemini-1.5-flash'
+USE_LOCAL_AI = False
+LOCAL_MODEL_NAME = 'minicpm-v:8b'
+API_MODEL_NAME = 'gemini-2.0-flash'
 
 utils.configure_generative_ai()
-model = genai.GenerativeModel(model_name=API_MODEL_NAME) # type: ignore
+config = GenerationConfig(
+    temperature=0.7,
+    top_p=0.8,
+    top_k=40,
+    max_output_tokens=500, # Limita o tamanho da resposta para não gastar tempo/tokens
+)
+
+# Passa a config na inicialização do modelo
+model = genai.GenerativeModel( # type: ignore
+    model_name=API_MODEL_NAME,
+    generation_config=config,
+)
 
 # Variável global para armazenar o objeto da sessão de chat
 chat_session = None
@@ -59,39 +71,47 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
     """
     try:
         user_text = text if text else 'No objective provided. Analyze the scene'
-        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum.'
+        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Empty.'
 
         system_prompt = f"""
-            You are a drone pilot AI controlling a Tello Drone.
-            CURRENT GOAL: "{user_text}"
-            HISTORY: {formatted_log_messages}
-
+            You are an advanced drone pilot AI controlling a Tello Drone.
+            
+            CURRENT MISSION CONTEXT:
+            - Input/Objective: "{user_text}"
+            - Command History: {formatted_log_messages}
+            
             INSTRUCTIONS:
-            1. Analyze the image to find obstacles or targets related to the GOAL.
-            2. Plan the next move safely.
+            1. Analyze the image to find obstacles or targets related to the Objective.
+            2. Plan the next move safely. 
             3. OUTPUT FORMAT (Strictly followed):
 
-            [ANALYSIS] Brief visual description in English.
-            [DECISION] command value
-            [CONTINUE] (Optional tag if route is not finished)
+            [ANÁLISE] (Write this in Portuguese) Visual description and status.
+            [PLANO] (Write this in Portuguese) 1. Next step. 2. Future steps.
+            [COMANDO] command value
+            [CONTINUA] (Tag mandatory only if more steps are needed)
 
-            AVAILABLE COMMANDS:
-            - Movement (cm): forward, back, left, right, up, down (val: 20-500)
-            - Rotation (deg): cw, ccw (val: 1-360)
+            AVAILABLE COMMANDS (Use EXACTLY these words):
+            - Movement: forward, back, left, right, up, down (val: 20-500)
+            - Rotation: cw, ccw (val: 1-360)
             - System: takeoff, land
 
-            EXAMPLE:
-            User: "Go to the door"
-            Image: Open door ahead.
-            [ANALYSIS] I see an open door in front of me. Path is clear.
-            [DECISION] forward 100
-            [CONTINUE]
+            EXAMPLES:
             
-            ANOTHER INTERACTION:
-            User: "OBJECTIVE: Go to the door. PREVIOUS ACTION RESULT: I've reached the door safely. What now?"
-            Image: Reached the door.
-            [ANALYSIS] I am at the door. No obstacles around.
-            [DECISION] land
+            Input: "Vá para a porta" (Turn 1)
+            ## EXAMPLE OUTPUT TURN 1 ##
+            [ANÁLISE] Vejo uma cadeira bloqueando o caminho.
+            [PLANO] 1. Girar para desviar. 2. Avançar.
+            [COMANDO] cw 20
+            [CONTINUA]
+            ## END EXAMPLE OUTPUT TURN 1 ##
+
+            Input: "Vá para a porta. ANÁLISE ANTERIOR: Girei para desviar." (Turn 2)
+            ## EXAMPLE OUTPUT TURN 2 ##
+            [ANÁLISE] Caminho livre agora. Vejo a porta.
+            [PLANO] 1. Avançar até a porta.
+            [COMANDO] forward 100
+            [CONTINUA]
+            ## END EXAMPLE OUTPUT TURN 2 ##
             """
         
         stream = ollama.chat(
@@ -103,7 +123,13 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
                     'images': [pil_image_to_bytes(frame)]
                 }
             ],
-            stream=True
+            stream=True,
+            options={
+                'temperature': 0.6,  # (0.0 a 1.0) Quanto menor, mais determinístico/lógico.
+                'top_p': 0.8,        # (0.0 a 1.0) Considera apenas as top 50% probabilidades.
+                'num_ctx': 4096,     # Tamanho da janela de contexto (memória).
+                'seed': 42           # Semente fixa para tentar reproduzir sempre a mesma resposta.
+            }
         )
 
         full_response_text = ""
@@ -118,15 +144,28 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
         lines = full_response_text.split('\n')
         for line in lines:
             line = line.strip()
-            # Ignora linhas de raciocínio para pegar o comando
-            if 'DECISION' in line.upper():
-                parts = line.split(']')
-                if len(parts) > 1:
-                    cmd = parts[1].strip().replace(':', '').strip() # Limpa dois pontos extras
-                    if validate_command(cmd):
-                        extracted_command = cmd
             
-            if 'CONTINUE' in line.upper():
+            if '[COMANDO]' in line.upper():
+                raw_content = line.split(']')[-1].strip()
+                
+                parts = raw_content.split()
+                
+                if len(parts) >= 1:
+                    cmd = parts[0].lower()
+                    
+                    if cmd in ['land', 'takeoff']:
+                        extracted_command = cmd
+                    
+                    elif len(parts) >= 2:
+                        val = parts[1]
+                        val_clean = ''.join(filter(str.isdigit, val))
+                        
+                        candidate = f"{cmd} {val_clean}"
+                        
+                        if validate_command(candidate):
+                            extracted_command = candidate
+            
+            if '[CONTINUA]' in line.upper():
                 continue_route = True
         
         # Fallback de segurança: Se a IA local falhar a formatação mas escrever o comando
@@ -166,7 +205,7 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
 
         if step == 0:
             system_prompt = f"""
-                ANÁLISE DE CENA E COMANDO PARA DRONE
+                ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
 
                 Contexto:
                 - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
@@ -183,21 +222,30 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
                 3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
                 4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
                 Obs:
-                1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
-                2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
-                3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
+                    1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
+                    2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
+                    3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
 
                 Exemplo de Raciocínio para "vá para a mesa":
+                ## RESPOSTA EXEMPLO TURNO 1 ##
                 [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
                 [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
-                [DECISÃO] ccw 90
+                [COMANDO] ccw 90
                 [CONTINUA]
+                ## FIM RESPOSTA EXEMPLO TURNO 1 ##
+
+                ## RESPOSTA EXEMPLO TURNO 2 ##
+                [ANÁLISE] Agora estou encarando a mesa, que está a cerca de 100 cm de distância.
+                [PLANO] 1. Avançar 100 cm para alcançar a mesa. 2. Nenhum outro passo necessário.
+                [COMANDO] forward 100
+                ## FIM RESPOSTA EXEMPLO TURNO 2 ##
 
                 Formato Obrigatório da Resposta:
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
                 [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                [COMANDO] O comando técnico exato para o PRIMEIRO passo do seu plano.
                 [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                Estou testando o programa, não decole o drone
                 """
         else:
             system_prompt = f"""
@@ -212,7 +260,7 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
                 Formato Obrigatório da Resposta:
                 [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
                 [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
+                [COMANDO] O comando técnico exato para o PRIMEIRO passo do seu plano.
                 [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
                 """
 
@@ -223,11 +271,16 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         response = current_chat.send_message(content_for_turn)
 
         # Verifica se a resposta foi bloqueada ou está vazia
+        # Se falhar, vamos imprimir EXATAMENTE o que o Google retornou
         if not response.parts:
-            error_message = "Resposta da IA bloqueada ou vazia."
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                error_message += f" Causa: {response.prompt_feedback.block_reason if hasattr(response.prompt_feedback, 'block_reason') else 'Não especificada'}."
-            return error_message, None, False
+            print("\n--- DEBUG GEMINI BLOQUEADO ---")
+            if hasattr(response, 'prompt_feedback'):
+                print(f"Prompt Feedback: {response.prompt_feedback}")
+            if hasattr(response, 'candidates') and response.candidates:
+                print(f"Finish Reason: {response.candidates[0].finish_reason}")
+                print(f"Safety Ratings: {response.candidates[0].safety_ratings}")
+            print("------------------------------\n")
+            return "Erro: Bloqueio de Segurança Rígido.", None, False
 
         natural_response_text = response.text
         extracted_command = None
@@ -236,8 +289,8 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         # Extração do comando
         response_lines = natural_response_text.split('\n')
         for line in response_lines:
-            if line.startswith('[DECISÃO]'):
-                command_text = line.replace('[DECISÃO]', '').strip()
+            if line.startswith('[COMANDO]'):
+                command_text = line.replace('[COMANDO]', '').strip()
                 if command_text.lower() == 'nenhum comando necessário' or not command_text:
                     extracted_command = None
                 else:
