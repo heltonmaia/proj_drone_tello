@@ -4,13 +4,14 @@ from PIL import Image
 import traceback
 import ollama
 import io
+import re
 
 from modules import utils
 from modules.tello_control import log_messages
 
-USE_LOCAL_AI = False
+USE_LOCAL_AI = True
 LOCAL_MODEL_NAME = 'minicpm-v:8b'
-API_MODEL_NAME = 'gemini-2.0-flash'
+API_MODEL_NAME = 'gemini-2.5-flash'
 
 utils.configure_generative_ai()
 config = GenerationConfig(
@@ -46,6 +47,71 @@ def get_chat_session():
         print('Sessão de chat iniciada.')
     return chat_session
 
+def extract_command(text):
+    """
+    Extrai comandos em qualquer posição da linha.
+    Suporta formatos como:
+      "[COMANDO] ccw 90"
+      "COMANDO: forward 50"
+      "ccw 90"
+    """
+    text = text.lower()
+
+    pattern = r'(up|down|left|right|forward|back|cw|ccw)\s+(\d+)'
+    match = re.search(pattern, text)
+    if match:
+        cmd = match.group(1)
+        val = match.group(2)
+        return f"{cmd} {val}"
+
+    if "takeoff" in text:
+        return "takeoff"
+    if "land" in text:
+        return "land"
+
+    return None
+
+
+def fix_command(raw_command: str) -> str | None:
+    if not raw_command:
+        return None
+        
+    parts = raw_command.lower().strip().split()
+    if not parts:
+        return None
+        
+    cmd = parts[0]
+
+    if cmd in ['takeoff', 'land']:
+        return cmd
+
+    if len(parts) == 1:
+        if cmd in ['cw', 'ccw']:
+            return f"{cmd} 90"
+        if cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
+            return f"{cmd} 50"
+
+    if len(parts) >= 2:
+        val_str = ''.join(filter(str.isdigit, parts[1]))
+
+        if not val_str:
+            if cmd in ['cw', 'ccw']:
+                return f"{cmd} 90"
+            else:
+                return f"{cmd} 50"
+
+        val = int(val_str)
+
+        if cmd in ['cw', 'ccw']:
+            val = max(1, min(val, 360))
+        else:
+            val = max(20, min(val, 500))
+
+        return f"{cmd} {val}"
+
+    return None
+
+
 def pil_image_to_bytes(image: Image.Image) -> bytes:
     """Converte PIL Image para bytes, redimensionando para performance local."""
     base_width = 640
@@ -58,60 +124,54 @@ def pil_image_to_bytes(image: Image.Image) -> bytes:
         img_resized.save(buffer, format="JPEG", quality=80)
         return buffer.getvalue()
 
-def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
+def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None, bool]:
     """
     Executa a IA localmente com Ollama.
     Args:
         text (str | None): Descrição do que o drone deve fazer.
         frame (Image.Image): Frame da câmera do drone.
-        step (int): Passo atual na sequência de comandos.
-        height (int): Altura atual do drone em cm.
     Returns:
-        tuple: (resposta natural, comando técnico, continuar rota)
+        tuple: (resposta natural, comando técnico)
     """
     try:
         user_text = text if text else 'No objective provided. Analyze the scene'
-        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Empty.'
 
         system_prompt = f"""
-            You are an advanced drone pilot AI controlling a Tello Drone.
+            You are a ROBOT PILOT controlling a Tello Drone. You must follow the User Input STRICTLY.
+            You must analyze the provided image and generate a command. Command parts are: DIRECTION and VALUE.
             
-            CURRENT MISSION CONTEXT:
-            - Input/Objective: "{user_text}"
-            - Command History: {formatted_log_messages}
+            [DIRECTION GUIDE]
+            If User says: "Suba", "Cima", "Alto" -> COMMAND: up
+            If User says: "Desça", "Baixo", "Chão" -> COMMAND: down
+            If User says: "Frente", "Avance" -> COMMAND: forward
+            If User says: "Trás", "Volte", "Recue" -> COMMAND: back
+            If User says: "Vá para a esquerda" -> COMMAND: left
+            If User says: "Vá para a direita" -> COMMAND: right
+            If User says: "Gire pra esquerda", "Vire" -> COMMAND: ccw
+            If User says: "Gire pra direita", "Vire" -> COMMAND: cw
+
+            [VALUE RANGE]
+            - ABSOLUTE LIMITS: Distance [20-500], Rotation [1-360].
+            
+            CURRENT SITUATION:
+            - User Input: "{user_text}"
             
             INSTRUCTIONS:
-            1. Analyze the image to find obstacles or targets related to the Objective.
-            2. Plan the next move safely. 
-            3. OUTPUT FORMAT (Strictly followed):
-
-            [ANÁLISE] (Write this in Portuguese) Visual description and status.
-            [PLANO] (Write this in Portuguese) 1. Next step. 2. Future steps.
-            [COMANDO] command value
-            [CONTINUA] (Tag mandatory only if more steps are needed)
-
-            AVAILABLE COMMANDS (Use EXACTLY these words):
-            - Movement: forward, back, left, right, up, down (val: 20-500)
-            - Rotation: cw, ccw (val: 1-360)
-            - System: takeoff, land
-
-            EXAMPLES:
+            1. First, identify the direction requested in the User Input.
+            2. Only look at the image to check for IMMEDIATE OBSTACLES in that direction.
+            3. If the way is clear, execute the requested command.
+            4. If there is no need to move, use "none" command.
+            5. Write after the [] tags
             
-            Input: "Vá para a porta" (Turn 1)
-            ## EXAMPLE OUTPUT TURN 1 ##
-            [ANÁLISE] Vejo uma cadeira bloqueando o caminho.
-            [PLANO] 1. Girar para desviar. 2. Avançar.
-            [COMANDO] cw 20
-            [CONTINUA]
-            ## END EXAMPLE OUTPUT TURN 1 ##
-
-            Input: "Vá para a porta. ANÁLISE ANTERIOR: Girei para desviar." (Turn 2)
-            ## EXAMPLE OUTPUT TURN 2 ##
-            [ANÁLISE] Caminho livre agora. Vejo a porta.
-            [PLANO] 1. Avançar até a porta.
-            [COMANDO] forward 100
-            [CONTINUA]
-            ## END EXAMPLE OUTPUT TURN 2 ##
+            OUTPUT FORMAT:
+            [ANÁLISE] (Explain what the user asked and if the path is clear in portuguese)
+            [COMANDO] command value
+            
+            EXAMPLE:
+            User Input: "Suba um pouco"
+            Output:
+            [ANÁLISE] O usuário pediu para subir. Não há obstáculos imediatos.
+            [COMANDO] up 50
             """
         
         stream = ollama.chat(
@@ -125,8 +185,8 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
             ],
             stream=True,
             options={
-                'temperature': 0.6,  # (0.0 a 1.0) Quanto menor, mais determinístico/lógico.
-                'top_p': 0.8,        # (0.0 a 1.0) Considera apenas as top 50% probabilidades.
+                'temperature': 0.1,  # (0.0 a 1.0) Quanto menor, mais determinístico/lógico.
+                'top_p': 0.6,
                 'num_ctx': 4096,     # Tamanho da janela de contexto (memória).
                 'seed': 42           # Semente fixa para tentar reproduzir sempre a mesma resposta.
             }
@@ -139,34 +199,14 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
             full_response_text += part
 
         extracted_command = None
-        continue_route = False
         
         lines = full_response_text.split('\n')
         for line in lines:
             line = line.strip()
             
             if '[COMANDO]' in line.upper():
-                raw_content = line.split(']')[-1].strip()
-                
-                parts = raw_content.split()
-                
-                if len(parts) >= 1:
-                    cmd = parts[0].lower()
-                    
-                    if cmd in ['land', 'takeoff']:
-                        extracted_command = cmd
-                    
-                    elif len(parts) >= 2:
-                        val = parts[1]
-                        val_clean = ''.join(filter(str.isdigit, val))
-                        
-                        candidate = f"{cmd} {val_clean}"
-                        
-                        if validate_command(candidate):
-                            extracted_command = candidate
-            
-            if '[CONTINUA]' in line.upper():
-                continue_route = True
+                raw_command = extract_command(line)
+                extracted_command = fix_command(raw_command)
         
         # Fallback de segurança: Se a IA local falhar a formatação mas escrever o comando
         if not extracted_command:
@@ -177,7 +217,7 @@ def run_ai_local(text: str | None, frame: Image.Image, step: int=0, height: int=
                              extracted_command = line
                              break
 
-        return full_response_text, extracted_command, continue_route
+        return full_response_text, extracted_command, False
 
     except Exception as e:
         error_details = traceback.format_exc()
@@ -205,63 +245,33 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
 
         if step == 0:
             system_prompt = f"""
-                ANÁLISE DE CENA E COMANDO PARA DRONE TELLO
+                ATUAR COMO PILOTO DE DRONE TELLO (Simulação Lógica).
+                Objetivo: {user_text}
+                Histórico: {formatted_log_messages}
+                Comandos válidos: {COMMAND_LIST}
+                Altura do drone: {height} (10cm geralmente significa que está no chão)
 
-                Contexto:
-                - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
-                - Comandos disponíveis: {COMMAND_LIST}
-                - Comandos enviados até agora: {formatted_log_messages}
-                - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
-
-                Objetivo Principal:
-                {user_text}
-
-                Instruções de Raciocínio Passo a Passo:
-                1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
-                2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
-                3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
-                4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
-                Obs:
-                    1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
-                    2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
-                    3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
-
-                Exemplo de Raciocínio para "vá para a mesa":
-                ## RESPOSTA EXEMPLO TURNO 1 ##
-                [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
-                [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
-                [COMANDO] ccw 90
-                [CONTINUA]
-                ## FIM RESPOSTA EXEMPLO TURNO 1 ##
-
-                ## RESPOSTA EXEMPLO TURNO 2 ##
-                [ANÁLISE] Agora estou encarando a mesa, que está a cerca de 100 cm de distância.
-                [PLANO] 1. Avançar 100 cm para alcançar a mesa. 2. Nenhum outro passo necessário.
-                [COMANDO] forward 100
-                ## FIM RESPOSTA EXEMPLO TURNO 2 ##
-
-                Formato Obrigatório da Resposta:
-                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [COMANDO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
-                Estou testando o programa, não decole o drone
+                Comandos de voo requerem argumento numérico em cm: forward 20 (para frente 20cm)
+                Comandos que não precisam de argumento: [takeoff, land]
+                Valores dos argumentos devem estar entre: [11, 500], representam a distância em cm (movimentos) ou graus (rotações)
+                
+                FORMATO DE RESPOSTA (Obrigatório):
+                [ANÁLISE] (Descreva o que vê e a relação com o objetivo aqui)
+                [PLANO] (1. Passo atual. 2. Próximo passo)
+                [COMANDO] (Ex: forward 100 ou cw 90)
+                [CONTINUA] Use se a missão não acabou
                 """
         else:
             system_prompt = f"""
-                CONTINUAÇÃO DE COMANDO
-                Você sinalizou que sua tarefa não estava completa. Continue seu raciocínio e planejamento com base na imagem atual.
-                Lembre-se de revisar o 'Objetivo Principal' e ajustar seu plano conforme necessário.
-                Objetivo Principal:
-                {user_text}
-                Comandos enviados até agora: {formatted_log_messages}
-                Altura: {height} cm.
-                Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
-                Formato Obrigatório da Resposta:
-                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [COMANDO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
+                CONTINUAÇÃO DA MISSÃO.
+                {user_text} (contém o contexto anterior).
+                
+                Analise se a ação anterior funcionou observando a nova imagem.
+                Responda no mesmo formato: 
+                [ANÁLISE] (Nova análise da sua visão)
+                [PLANO] (2 próximos passos planejados)
+                [COMANDO] (Comando de voo)
+                [CONTINUA] Caso deva continuar após esse passo
                 """
 
         # Constrói o prompt para o turno atual.
@@ -271,7 +281,6 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         response = current_chat.send_message(content_for_turn)
 
         # Verifica se a resposta foi bloqueada ou está vazia
-        # Se falhar, vamos imprimir EXATAMENTE o que o Google retornou
         if not response.parts:
             print("\n--- DEBUG GEMINI BLOQUEADO ---")
             if hasattr(response, 'prompt_feedback'):
@@ -289,14 +298,10 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         # Extração do comando
         response_lines = natural_response_text.split('\n')
         for line in response_lines:
-            if line.startswith('[COMANDO]'):
-                command_text = line.replace('[COMANDO]', '').strip()
-                if command_text.lower() == 'nenhum comando necessário' or not command_text:
-                    extracted_command = None
-                else:
-                    extracted_command = command_text
-                continue
-            
+            if '[COMANDO]' in line.upper():
+                raw_command = extract_command(line)
+                extracted_command = fix_command(raw_command)
+
             elif line.startswith('[CONTINUA]'):
                 continue_route = True
         
@@ -307,10 +312,19 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         print(f"DEBUG: Erro em run_ai: {str(e)}\n{error_details}")
         return f"Erro crítico ao processar com IA: {str(e)}", None, False
     
-def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
-    """Função Mestra que decide qual IA usar."""
+def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool | None]:
+    """
+    Função Mestra que decide qual IA usar.
+    Args:
+        text (str | None): Descrição do que o drone deve fazer.
+        frame (Image.Image): Frame da câmera do drone.
+        step (int): Passo atual na sequência de comandos.
+        height (int): Altura atual do drone em cm.
+    Returns:
+        tuple: (resposta natural, comando técnico, continuar rota)
+    """
     if USE_LOCAL_AI:
-        return run_ai_local(text, frame, step, height)
+        return run_ai_local(text, frame)
     else:
         return run_ai_gemini(text, frame, step, height)
     

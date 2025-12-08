@@ -289,6 +289,20 @@ class TelloGUI:
             daemon=True
         ).start()
 
+    def _extract_tag_content(self, text: str, tag: str) -> str:
+        """Extrai conteúdo de uma tag de forma segura, limpando colchetes seguintes."""
+        if tag not in text:
+            return ""
+        try:
+            # Pega tudo depois da tag
+            content = text.split(tag)[1]
+            # Se houver outra tag de abertura '[' depois, corta nela
+            if "[" in content:
+                content = content.split("[")[0]
+            return content.strip()
+        except:
+            return ""
+
     def _execute_ai_sequence(self, user_text: str, initial_frame: Image.Image) -> None:
         """
         Roda em uma thread e gerencia o loop de múltiplos passos.
@@ -298,21 +312,25 @@ class TelloGUI:
         """
         self.is_sequence_running = True
         self.abort_sequence_event.clear()
-        self.root.after(0, self._set_ui_for_sequence, True) # Desabilita a UI por segurança
+        self.root.after(0, self._set_ui_for_sequence, True)
 
-        MAX_STEPS = int(self.max_steps)
+        MAX_STEPS = 1 if chatbot.USE_LOCAL_AI else int(self.max_steps)
         current_frame = initial_frame
         
-        # Contexto persistente
-        context_memory = ""
+        last_analysis = "Início da missão."
+        last_action = "Nenhuma."
 
         try:
             for step in range(MAX_STEPS):
-                # Injeta a memória no prompt
                 if step == 0:
                     prompt_text = user_text
                 else:
-                    prompt_text = f"{user_text}. ANÁLISE DA AÇÃO ANTERIOR: {context_memory}"
+                    prompt_text = (
+                        f"OBJETIVO GLOBAL: {user_text}. "
+                        f"SITUAÇÃO ANTERIOR: {last_analysis}. "
+                        f"AÇÃO EXECUTADA: {last_action}. "
+                        f"O que fazer agora?"
+                    )
 
                 response, command, continue_route = chatbot.run_ai(
                     prompt_text,
@@ -321,16 +339,20 @@ class TelloGUI:
                     self.drone_height
                 )
 
-                # Atualiza a UI
-                self.root.after(0, self.update_chat_display, f"Step {step+1}", response)
+                # Atualiza UI
+                display_text = user_text if step == 0 else f"Step {step + 1}"
+                self.root.after(0, self.update_chat_display, display_text, response)
 
-                if "[ANÁLISE]" in response:
-                    try:
-                        context_memory = response.split("[ANÁLISE]")[1].split("[")[0].strip()
-                    except:
-                        context_memory = response[:100]
+                # Extrai a análise para entender o cenário
+                extracted_analysis = self._extract_tag_content(response, "[ANÁLISE]")
+                if extracted_analysis:
+                    last_analysis = extracted_analysis[:150] # Limita tamanho
+
+                # Extrai o comando para saber o que foi decidido
+                if command:
+                    last_action = command
                 else:
-                     context_memory = response[:50]
+                    last_action = "Nenhum comando gerado."
 
                 if command and chatbot.validate_command(command):
                     tello_control.process_ai_command(self.tello, command)
@@ -342,15 +364,15 @@ class TelloGUI:
                 if not continue_route:
                     break
                 
-                was_interrupted = self.abort_sequence_event.wait(6)
-                
-                if was_interrupted:
-                    break
+                was_interrupted = self.abort_sequence_event.wait(3)
+                if was_interrupted: break
                 
                 current_frame = self.img_ai
 
         except Exception as e:
             print(f"Erro seq: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.is_sequence_running = False
             self.root.after(0, self._set_ui_for_sequence, False)
