@@ -41,15 +41,15 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        connected = self.tello.start_tello()
+        # connected = self.tello.start_tello()
 
-        if not connected:
-            messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
-            self.root.destroy()
-            return
+        # if not connected:
+        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+        #     self.root.destroy()
+        #     return
 
         self.command_log = tello_control.log_messages
-        #self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
@@ -186,6 +186,11 @@ class TelloGUI:
         log_frame = ttk.Frame(sidebar_frame)
         log_frame.pack(fill='both', expand=True, padx=5, pady=5)
         ttk.Label(log_frame, text="Log").pack(anchor="w")
+
+        model_frame = ttk.Frame(sidebar_frame)
+        model_frame.pack(fill='x', padx=5, pady=(0,5))
+        model_name = chatbot.get_model_name()
+        ttk.Label(model_frame, text="Modelo: " + model_name).pack(anchor="w")
         
         self.log_listbox = tk.Listbox(log_frame, height=10)
         self.log_listbox.pack(fill='both', expand=True, side='left')
@@ -289,20 +294,6 @@ class TelloGUI:
             daemon=True
         ).start()
 
-    def _extract_tag_content(self, text: str, tag: str) -> str:
-        """Extrai conteúdo de uma tag de forma segura, limpando colchetes seguintes."""
-        if tag not in text:
-            return ""
-        try:
-            # Pega tudo depois da tag
-            content = text.split(tag)[1]
-            # Se houver outra tag de abertura '[' depois, corta nela
-            if "[" in content:
-                content = content.split("[")[0]
-            return content.strip()
-        except:
-            return ""
-
     def _execute_ai_sequence(self, user_text: str, initial_frame: Image.Image) -> None:
         """
         Roda em uma thread e gerencia o loop de múltiplos passos.
@@ -314,7 +305,7 @@ class TelloGUI:
         self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True)
 
-        MAX_STEPS = 1 if chatbot.USE_LOCAL_AI else int(self.max_steps)
+        MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
         current_frame = initial_frame
         
         last_analysis = "Início da missão."
@@ -344,9 +335,7 @@ class TelloGUI:
                 self.root.after(0, self.update_chat_display, display_text, response)
 
                 # Extrai a análise para entender o cenário
-                extracted_analysis = self._extract_tag_content(response, "[ANÁLISE]")
-                if extracted_analysis:
-                    last_analysis = extracted_analysis[:150] # Limita tamanho
+                last_analysis = response[:200]
 
                 # Extrai o comando para saber o que foi decidido
                 if command:
@@ -398,8 +387,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        frame = self.tello.get_frame()
-        # frame = self.webcam.read()[1] # Ativar webcam
+        # frame = self.tello.get_frame()
+        frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
