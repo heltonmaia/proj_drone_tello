@@ -292,7 +292,7 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
                     'images': [img_bytes]
                 }
             ],
-            # format='json', # DESCOMENTE SE O MODELO SUPORTAR MODO JSON NATIVO (MiniCPM as vezes falha com isso)
+            # format='json', # Verificar se necessário
             options={
                 'temperature': 0.1, 
                 'top_p': 0.6,
