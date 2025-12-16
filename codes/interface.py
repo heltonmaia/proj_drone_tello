@@ -41,15 +41,15 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        # connected = self.tello.start_tello()
+        connected = self.tello.start_tello()
 
-        # if not connected:
-        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
-        #     self.root.destroy()
-        #     return
+        if not connected:
+            messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+            self.root.destroy()
+            return
 
         self.command_log = tello_control.log_messages
-        self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        # self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
@@ -284,35 +284,78 @@ class TelloGUI:
             return
 
         user_text = self.text_input_entry.get()
-        frame = self.img_ai
 
         self.text_input_entry.delete(0, tk.END) # Limpa a caixa de entrada de texto
 
         threading.Thread(
             target=self._execute_ai_sequence,
-            args=(user_text, frame),
+            args=(user_text,),
             daemon=True
         ).start()
 
-    def _execute_ai_sequence(self, user_text: str, initial_frame: Image.Image) -> None:
+    def _get_frame(self) -> Image.Image:
+        """
+        Captura frame mais recente direto da thread de vídeo.
+        Returns:
+            Image.Image: O frame atual como uma imagem PIL.
+        """
+        try:
+            # Verifica se o objeto frame existe e é um array numpy válido
+            if hasattr(self.tello, 'frame') and isinstance(self.tello.frame, np.ndarray):
+                if self.tello.frame.size > 0:
+                    frame = self.tello.frame.copy()
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    return Image.fromarray(img_rgb)
+        except Exception as e:
+            pass
+    
+        if hasattr(self, 'img_ai') and self.img_ai:
+            return self.img_ai
+        return Image.new('RGB', (640, 480), color='black')
+    
+    def _calculate_wait_time(self, command: str) -> float:
+        """
+        Calcula quanto tempo esperar baseado na física do drone.
+        Args:
+            command (str): O comando enviado ao drone.
+        Returns:
+            float: Tempo estimado em segundos para o comando completar.
+        """
+        if not command: return 1.0
+        
+        parts = command.split()
+        cmd = parts[0].lower()
+        val = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+
+        # Rotações são lentas. ~2s para 90 graus é uma margem segura + estabilização
+        if cmd in ['cw', 'ccw']:
+            return (val / 90.0) * 1.5 + 1.5
+        
+        # Movimentos lineares
+        if cmd in ['forward', 'back', 'left', 'right', 'up', 'down']:
+            return (val / 100.0) * 1.0 + 1.5 # 1s a cada 100cm + 1.5s de inércia
+            
+        return 3.0 # Takeoff/Land
+
+    def _execute_ai_sequence(self, user_text: str) -> None:
         """
         Roda em uma thread e gerencia o loop de múltiplos passos.
         Args:
             user_text (str): A entrada de texto do usuário.
-            initial_frame (Image.Image): O frame inicial da câmera.
         """
         self.is_sequence_running = True
         self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True)
 
         MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
-        current_frame = initial_frame
+        current_frame = self._get_frame()
         
         last_analysis = "Início da missão."
         last_action = "Nenhuma."
 
         try:
             for step in range(MAX_STEPS):
+                current_frame = self._get_frame() # Pega o frame mais recente no inicio do loop
                 if step == 0:
                     prompt_text = user_text
                 else:
@@ -337,26 +380,28 @@ class TelloGUI:
                 # Extrai a análise para entender o cenário
                 last_analysis = response[:200]
 
-                # Extrai o comando para saber o que foi decidido
-                if command:
-                    last_action = command
-                else:
-                    last_action = "Nenhum comando gerado."
-
                 if command and chatbot.validate_command(command):
+                    last_action = command
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
+                    
+                    wait_time = self._calculate_wait_time(command)
+                    
+                    was_interrupted = self.abort_sequence_event.wait(wait_time)
+                    if was_interrupted:
+                        print("Sequência abortada durante espera.")
+                        break
                 else:
+                    last_action = "Nenhum comando."
                     print(f"Sem comando válido no passo {step}.")
                     if not continue_route: break
 
                 if not continue_route:
                     break
                 
-                was_interrupted = self.abort_sequence_event.wait(3)
-                if was_interrupted: break
-                
-                current_frame = self.img_ai
+                # Se não houve comando (apenas análise), espera um pouco menos antes do próximo loop
+                if not command:
+                    if self.abort_sequence_event.wait(2): break
 
         except Exception as e:
             print(f"Erro seq: {e}")
@@ -387,8 +432,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        # frame = self.tello.get_frame()
-        frame = self.webcam.read()[1] # Ativar webcam
+        frame = self.tello.get_frame()
+        # frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
