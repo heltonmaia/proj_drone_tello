@@ -79,8 +79,17 @@ def get_model_name():
     else:
         return GEMINI_MODEL_NAME
 
-def get_system_instruction(objective, history, height, step):
-    """Gera o prompt de sistema focado em JSON"""
+def get_ai_instruction(objective, history, height, step) -> str:
+    """
+    Gera o prompt para a IA com base no contexto atual.
+    Args:
+        objective (str): Objetivo da missão.
+        history (str): Histórico de comandos.
+        height (int): Altura atual do drone em cm.
+        step (int): Passo atual na sequência de comandos.
+    Returns:
+        str: Instrução formatada para a IA.
+    """
     if step == 0:
         return f"""
             ATUAR COMO PILOTO DE DRONE TELLO (Simulação Lógica).
@@ -206,8 +215,14 @@ def pil_image_to_base64(image: Image.Image) -> str:
     img_bytes = pil_image_to_bytes(image)
     return base64.b64encode(img_bytes).decode('utf-8')
 
-def parse_json_response(text_response):
-    """Tenta converter a string da IA em um objeto Python"""
+def parse_json_response(text_response: str) -> dict:
+    """
+    Função unificada para parsear respostas JSON de qualquer provedor de IA.
+    Args:
+        text_response (str): Resposta em texto da IA.
+    Returns:
+        dict: Dicionário com os campos esperados.
+    """
     try:
         text_response = text_response.strip()
         
@@ -232,17 +247,41 @@ def parse_json_response(text_response):
         
         # Retorno de segurança para não travar a UI
         return {
-            "analise": "Erro na comunicação (JSON Inválido). Tentando estabilizar.", 
-            "comando": "none", 
+            "analise": "Erro na comunicação (JSON Inválido). Tentando estabilizar.",
+            "comando": "none",
             "continua": False
         }
     except Exception as e:
         print(f"Erro genérico no parse: {e}")
         return {
-            "analise": f"Erro: {str(e)}", 
-            "comando": None, 
+            "analise": f"Erro: {str(e)}",
+            "comando": None,
             "continua": False
         }
+
+from PIL import ImageDraw
+
+def add_grid_to_image(image: Image.Image) -> Image.Image:
+    """
+    Desenha um grid 3x3 na imagem para ajudar a IA na noção espacial.
+    Args:
+        image (Image.Image): Imagem original.
+    Returns:
+        Image.Image: Imagem com grid desenhado.
+    """
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    
+    # Linhas Verticais (dividir em 3)
+    draw.line([(width/3, 0), (width/3, height)], fill="red", width=1)
+    draw.line([(2*width/3, 0), (2*width/3, height)], fill="red", width=1)
+    
+    # Linhas Horizontais (dividir em 3)
+    draw.line([(0, height/3), (width, height/3)], fill="red", width=1)
+    draw.line([(0, 2*height/3), (width, 2*height/3)], fill="red", width=1)
+    
+    return img
 
 def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None, bool]:
     """
@@ -251,36 +290,55 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
         text (str | None): Descrição do que o drone deve fazer.
         frame (Image.Image): Frame da câmera do drone.
     Returns:
-        tuple: (resposta formatada, comando técnico, flag continua)
+        tuple: (resposta formatada, comando técnico)
     """
     try:
         user_text = text if text else 'No objective provided. Analyze the scene.'
 
         system_prompt = f"""
-            You are a ROBOT PILOT controlling a Tello Drone.
+            You are a DRONE PILOT AI.
             User Input: "{user_text}"
 
-            [COMMAND RULES]
-            - Movement: up, down, forward, back, left, right (Value: 20-500).
-            - Rotation: cw, ccw (Value: 1-360).
-            - If no movement is needed or path is blocked: "none".
+            TASK: Analyze the image and the input. Generate a flight command.
+            
+            RULES:
+            1. Output MUST be valid JSON.
+            2. "analise" and "plano" must be in Portuguese.
+            3. "comando" must be technical: [direction] [value].
+            4. Valid directions: up, down, forward, back, left, right, cw, ccw.
+            5. If path is blocked or no action needed, command is "none".
 
-            [INSTRUCTIONS]
-            1. Analyze the User Input and the Image for obstacles.
-            2. Output strictly valid JSON.
-            3. The "analise" and "plano" fields must be in Portuguese.
-
-            REQUIRED JSON STRUCTURE:
+            ### EXAMPLES (Follow this pattern):
+            ### EXAMPLE 1
+            Input: "Vá para a frente"
+            Image: (Clear path)
             {{
-                "analise": "Brief situation report in Portuguese (Max 1 sentence)",
-                "plano": "Action plan",
-                "comando": "command value" (e.g., "forward 100" or "none"),
-                "continua": false
+                "analise": "Caminho livre à frente, sem obstáculos visíveis.",
+                "plano": "Avançar 100cm com segurança.",
+                "comando": "forward 100",
             }}
+            ### EXAMPLE 2
+            Input: "Suba um pouco"
+            Image: (Ceiling is far)
+            {{
+                "analise": "O teto está alto, posso subir.",
+                "plano": "Subir 50cm para ajustar altura.",
+                "comando": "up 50",
+            }}
+            ### EXAMPLE 3
+            Input: "Vire para a porta"
+            Image: (Door is on the right)
+            {{
+                "analise": "Vejo a porta à direita da imagem.",
+                "plano": "Girar 90 graus para alinhar com a porta.",
+                "comando": "cw 90",
+            }}
+            ### END EXAMPLES
             """
         
         # Converte imagem
-        img_bytes = pil_image_to_bytes(frame)
+        frame_with_grid = add_grid_to_image(frame)
+        img_bytes = pil_image_to_bytes(frame_with_grid)
 
         # Chamada ao Ollama
         response = ollama.chat(
@@ -292,11 +350,11 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
                     'images': [img_bytes]
                 }
             ],
-            # format='json', # Verificar se necessário
+            format='json', # Verificar se necessário
             options={
-                'temperature': 0.1, 
-                'top_p': 0.6,
-                'num_ctx': 2048,
+                'temperature': 0.0, # Menor temperatura para menores chances de alucinações
+                'top_p': 0.5,
+                'num_ctx': 4096,
                 'seed': 42
             }
         )
@@ -307,9 +365,8 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
         data = parse_json_response(full_response_text)
 
         # Formata o texto para exibição no chat da interface
-        chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
-
-        return chat_display_text, data['comando'], data['continua']
+        chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}"
+        return chat_display_text, data['comando'], False
 
     except Exception as e:
         error_details = traceback.format_exc()
@@ -334,11 +391,10 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         user_text = text if text else 'Analise a cena.'
         formatted_log = ", ".join(log_messages[-3:]) if log_messages else 'Nenhum.'
 
-        # Usa a nova função de prompt
-        system_prompt = get_system_instruction(user_text, formatted_log, height, step)
+        system_prompt = get_ai_instruction(user_text, formatted_log, height, step)
+        frame_with_grid = add_grid_to_image(frame)
 
-        # Envia para o Gemini
-        response = current_chat.send_message([system_prompt, frame])
+        response = current_chat.send_message([system_prompt, frame_with_grid])
 
         if not response.parts:
             print("\n--- DEBUG GEMINI BLOQUEADO ---")
@@ -366,16 +422,17 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
 
     try:
         user_text = text if text else 'Analise.'
-        base64_image = pil_image_to_base64(frame)
+        frame_with_grid = add_grid_to_image(frame)
+        base64_image = pil_image_to_base64(frame_with_grid)
         formatted_log = ", ".join(log_messages[-3:])
 
-        system_prompt = get_system_instruction(user_text, formatted_log, height, step)
+        system_prompt = get_ai_instruction(user_text, formatted_log, height, step)
 
         response = client_openai.chat.completions.create(
             model=OPENAI_MODEL_NAME,
             messages=[
                 {
-                    "role": "user", 
+                    "role": "user",
                     "content": [
                         {"type": "text", "text": system_prompt},
                         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
@@ -387,6 +444,8 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
         )
 
         full_text = response.choices[0].message.content
+        if not full_text:
+            return "Erro OpenAI: Resposta vazia.", None, False
         data = parse_json_response(full_text)
         
         chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
@@ -394,7 +453,6 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
 
     except Exception as e:
         return f"Erro OpenAI: {str(e)}", None, False
-
     
 def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool | None]:
     """

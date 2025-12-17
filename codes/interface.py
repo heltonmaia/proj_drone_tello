@@ -120,7 +120,7 @@ class TelloGUI:
         self.response_text_ai = tk.Text(
             self.ai_response_frame,
             wrap="word",
-            height=12,
+            height=8,
             state="disabled", # Começa como somente leitura
             font=("Ubuntu", 12),
             bg=LBF_COLOR,
@@ -268,19 +268,19 @@ class TelloGUI:
         new_max_steps = self.max_steps_input.get()
         if new_max_steps.isdigit():
             self.max_steps = int(new_max_steps)
-            print(f"Número máximos de passos atualizado para: {self.max_steps}")
+        self.show_message("Atualização", f"Número máximo de passos definido para: {self.max_steps}")
 
     def clear_logs(self) -> None:
         """Limpa o log de comandos"""
         self.command_log.clear()
         tello_control.log_messages.clear()
         self.log_listbox.delete(0, tk.END)
-        print("Logs limpos.")
+        self.show_message("Log", "Log de comandos limpo.")
 
     def send_ai_command(self) -> None:
         """Prepara e inicia a sequência de comandos da IA em uma thread gerenciadora."""
         if self.is_sequence_running:
-            print("Aviso: Sequência de IA já em andamento.")
+            self.show_message("Atenção", "Uma sequência já está em execução. Por favor, aguarde.")
             return
 
         user_text = self.text_input_entry.get()
@@ -300,13 +300,16 @@ class TelloGUI:
             Image.Image: O frame atual como uma imagem PIL.
         """
         try:
-            # Verifica se o objeto frame existe e é um array numpy válido
             if hasattr(self.tello, 'frame') and isinstance(self.tello.frame, np.ndarray):
                 if self.tello.frame.size > 0:
                     frame = self.tello.frame.copy()
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     return Image.fromarray(img_rgb)
-        except Exception as e:
+            # ret, frame = self.webcam.read()
+            # if ret:
+            #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            #     return Image.fromarray(img_rgb)
+        except Exception:
             pass
     
         if hasattr(self, 'img_ai') and self.img_ai:
@@ -374,7 +377,7 @@ class TelloGUI:
                 )
 
                 # Atualiza UI
-                display_text = user_text if step == 0 else f"Step {step + 1}"
+                display_text = user_text if step == 0 else f"Sequência de comandos, passo {step + 1}/{MAX_STEPS}"
                 self.root.after(0, self.update_chat_display, display_text, response)
 
                 # Extrai a análise para entender o cenário
@@ -507,11 +510,11 @@ class TelloGUI:
         """
         Atualiza os labels do chat, agora usando um widget Text para a resposta da IA.
         """
-        self.response_label_user.config(text=f"Você: {user_msg}")
+        self.response_label_user.config(text=user_msg)
 
         self.response_text_ai.config(state="normal")
         self.response_text_ai.delete("1.0", tk.END)
-        self.response_text_ai.insert(tk.END, f"Drone: {ai_msg}")
+        self.response_text_ai.insert(tk.END, ai_msg)
         self.response_text_ai.config(state="disabled")
         self.response_text_ai.see(tk.END)
 
@@ -580,10 +583,10 @@ class TelloGUI:
 
     def emergency_stop(self) -> None:
         """Função para parar imediatamente o drone."""
-        self.tello.send_cmd('stop')
+        # self.tello.send_cmd('stop')
         if self.abort_sequence_event:
             self.abort_sequence_event.set()
-        print("Comando de emergência enviado ao drone.")
+            print("Comando de emergência enviado ao drone.")
 
     def _exit(self) -> None:
         """Função chamada ao fechar a janela."""
