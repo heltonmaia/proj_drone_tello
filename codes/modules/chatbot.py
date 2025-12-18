@@ -47,7 +47,7 @@ if AI_PROVIDER == 'OPENAI':
             print(f"Erro ao configurar OpenAI: {e}")
 
 # Variável global para armazenar o objeto da sessão de chat
-chat_session = None
+chat_session_gemini = None
 
 COMMAND_LIST = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
@@ -60,11 +60,16 @@ def get_chat_session():
     Returns:
         ChatSession: A sessão de chat.
     """
-    global chat_session
-    if chat_session is None:
-        chat_session = model_gemini.start_chat(history=[])
+    global chat_session_gemini
+    if chat_session_gemini is None:
+        chat_session_gemini = model_gemini.start_chat(history=[])
         print('Sessão de chat iniciada.')
-    return chat_session
+    return chat_session_gemini
+
+def reset_openai_history():
+    """Limpa o histórico da OpenAI para iniciar nova missão."""
+    global openai_history
+    openai_history = []
 
 def get_model_name():
     """
@@ -337,8 +342,8 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
             """
         
         # Converte imagem
-        frame_with_grid = add_grid_to_image(frame)
-        img_bytes = pil_image_to_bytes(frame_with_grid)
+        frame_grid = add_grid_to_image(frame)
+        img_bytes = pil_image_to_bytes(frame_grid)
 
         # Chamada ao Ollama
         response = ollama.chat(
@@ -376,7 +381,7 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
 
 def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
     """
-    Executa a IA para gerar comandos de controle do drone.
+    Executa a IA para gerar comandos de controle do drone via Gemini.
     Args:
         text (str | None): Descrição do que o drone deve fazer.
         frame (Image.Image): Frame da câmera do drone.
@@ -392,9 +397,9 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         formatted_log = ", ".join(log_messages[-3:]) if log_messages else 'Nenhum.'
 
         system_prompt = get_ai_instruction(user_text, formatted_log, height, step)
-        frame_with_grid = add_grid_to_image(frame)
+        frame_grid = add_grid_to_image(frame)
 
-        response = current_chat.send_message([system_prompt, frame_with_grid])
+        response = current_chat.send_message([system_prompt, frame_grid])
 
         if not response.parts:
             print("\n--- DEBUG GEMINI BLOQUEADO ---")
@@ -417,41 +422,73 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         return f"Erro crítico: {str(e)}", None, False
     
 def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
-    if not client_openai:
-        return "Erro: OpenAI client não configurado (Verifique a API KEY).", None, False
+    """
+    Executa a IA para gerar comandos de controle do drone via OpenAI.
+    Args:
+        text (str | None): Descrição do que o drone deve fazer.
+        frame (Image.Image): Frame da câmera do drone.
+        step (int): Passo atual na sequência de comandos.
+        height (int): Altura atual do drone em cm.
+    Returns:
+        tuple: (resposta natural, comando técnico, continuar rota)
+    """
+    global openai_history
+    if not client_openai: return "Erro OpenAI Client.", None, False
 
     try:
-        user_text = text if text else 'Analise.'
-        frame_with_grid = add_grid_to_image(frame)
-        base64_image = pil_image_to_base64(frame_with_grid)
-        formatted_log = ", ".join(log_messages[-3:])
+        if step == 0:
+            reset_openai_history()
+            openai_history.append({
+                "role": "system",
+                "content": "Você é uma IA piloto de Drone. Responda APENAS em JSON."
+            })
 
-        system_prompt = get_ai_instruction(user_text, formatted_log, height, step)
+        user_text = text if text else 'Analise.'
+        hist_cmds = ", ".join(log_messages[-3:])
+        prompt = get_ai_instruction(user_text, hist_cmds, height, step)
+        
+        frame_grid = add_grid_to_image(frame)
+        base64_img = pil_image_to_base64(frame_grid)
+
+        current_user_msg = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_img}",
+                        "detail": "low" # Menos detalhes para performance
+                    }
+                }
+            ]
+        }
+        openai_history.append(current_user_msg)
 
         response = client_openai.chat.completions.create(
             model=OPENAI_MODEL_NAME,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": system_prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
-                    ]
-                }
-            ],
+            messages=openai_history,
             response_format={ "type": "json_object" },
-            max_tokens=300
+            max_tokens=300,
+            temperature=0.2
         )
 
         full_text = response.choices[0].message.content
         if not full_text:
             return "Erro OpenAI: Resposta vazia.", None, False
         data = parse_json_response(full_text)
-        
-        chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
-        return chat_display_text, data['comando'], data['continua']
+
+        openai_history.append({"role": "assistant", "content": full_text}) # Adiciona resposta ao histórico
+
+        last_user_idx = len(openai_history) - 2 # A penúltima mensagem é a do user
+        if openai_history[last_user_idx]['role'] == 'user':
+            openai_history[last_user_idx]['content'] = f" Prompt: {prompt}"
+
+        chat_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
+        return chat_text, data['comando'], data['continua']
 
     except Exception as e:
+        print(f"Erro OpenAI: {e}")
         return f"Erro OpenAI: {str(e)}", None, False
     
 def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool | None]:
