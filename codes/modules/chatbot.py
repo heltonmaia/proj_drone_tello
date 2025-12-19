@@ -1,7 +1,6 @@
-import os
 import google.generativeai as genai
 from google.generativeai.types import GenerationConfig
-from PIL import Image
+from PIL import Image, ImageDraw
 import traceback
 import ollama
 import io
@@ -20,6 +19,25 @@ LOCAL_MODEL_NAME = 'minicpm-v:8b'
 GEMINI_MODEL_NAME = 'gemini-2.5-flash'
 OPENAI_MODEL_NAME = 'gpt-4o-mini'
 OPENAI_API_KEY = utils.get_openai_key()
+ACCEPTED_ROTATIONS = [10, 15, 30, 45, 90, 135, 180, 360]
+COMMAND_LIST = [
+    'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
+]
+SYSTEM_INSTRUCTION_TEXT = f"""
+VOCÊ É UM PILOTO DE DRONE TELLO.
+Comandos válidos: {COMMAND_LIST}
+Argumentos numéricos em cm [20-500] ou graus [1-360].
+Exemplos: 'forward 100', 'cw 90', 'takeoff', 'land'.
+
+SAÍDA OBRIGATÓRIA EM JSON:
+{{
+    "analise": "Breve descrição visual e do status em português.",
+    "plano": "O que fará a seguir.",
+    "comando": "comando valor" (ou "none"),
+    "continua": boolean (true se a missão não acabou)
+}}
+"""
+openai_history = []
 
 utils.configure_generative_ai()
 config = GenerationConfig(
@@ -48,10 +66,6 @@ if AI_PROVIDER == 'OPENAI':
 
 # Variável global para armazenar o objeto da sessão de chat
 chat_session_gemini = None
-
-COMMAND_LIST = [
-    'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
-]
 
 def get_chat_session():
     """
@@ -84,7 +98,7 @@ def get_model_name():
     else:
         return GEMINI_MODEL_NAME
 
-def get_ai_instruction(objective, history, height, step) -> str:
+def get_ai_instruction(objective: str, history: str, height: int, step: int, max_steps: int) -> str:
     """
     Gera o prompt para a IA com base no contexto atual.
     Args:
@@ -123,13 +137,9 @@ def get_ai_instruction(objective, history, height, step) -> str:
             Objetivo: {objective}
             Histórico: {history}
             Altura: {height} cm
-            Passo atual: {step}
+            Passo: {step}/{max_steps}
 
             Comandos válidos: {COMMAND_LIST}
-            Regras:
-            1. Comandos de movimento (up, down, forward, etc) precisam de valor em cm (20-500).
-            2. Rotação (cw, ccw) em graus (1-360).
-            3. Se não precisar mover, use "none".
 
             SAÍDA OBRIGATÓRIA EM JSON:
             {{
@@ -139,69 +149,124 @@ def get_ai_instruction(objective, history, height, step) -> str:
                 "continua": boolean (true se a missão não acabou, false se acabou)
             }}
             """
+    
+def get_step_prompt(objective: str, last_action: str, height: int, step: int, max_steps: int) -> str:
+    """
+    Gera apenas o delta do prompt para o passo atual.
+    Args:
+        objective (str): Objetivo da missão.
+        last_action (str): Última ação executada pelo drone.
+        height (int): Altura atual do drone em cm.
+        step (int): Passo atual na sequência de comandos.
+        max_steps (int): Número máximo de passos permitidos.
+    Returns:
+        str: Prompt formatado para o passo atual.
+    """
+    return f"""
+    STATUS ATUAL:
+    - Objetivo Global: "{objective}"
+    - Passo: {step + 1}/{max_steps}
+    - Altura: {height} cm
+    - Última Ação Executada: "{last_action}"
+    
+    Analise a imagem atual e determine o próximo comando.
+    Siga a formatação JSON obrigatória.
+    """
 
-def extract_command(text):
+def _snap_to_closest(value: int, allowed_values: list[int]) -> int:
+    """
+    Encontra o valor mais próximo dentro de uma lista de permitidos.
+    Args:
+        value (int): Valor a ser ajustado.
+        allowed_values (list[int]): Lista de valores permitidos.
+    Returns:
+        int: Valor ajustado mais próximo.
+    """
+    return min(allowed_values, key=lambda x: abs(x - value))
+
+def extract_command(text: str) -> str | None:
     """
     Extrai comandos em qualquer posição da linha.
-    Suporta formatos como:
-      "[COMANDO] ccw 90"
-      "COMANDO: forward 50"
-      "ccw 90"
+    Args:
+        text (str): Texto bruto.
+    Returns:
+        str | None: Comando extraído ou None se inválido.
     """
+    if not text: return None
     text = text.lower()
 
-    pattern = r'(up|down|left|right|forward|back|cw|ccw)\s+(\d+)'
+    pattern = r'(up|down|left|right|forward|back|cw|ccw)[^\d]*(\d+)'
     match = re.search(pattern, text)
+    
     if match:
         cmd = match.group(1)
         val = match.group(2)
         return f"{cmd} {val}"
 
+    # Comandos sem valor
     if "takeoff" in text:
         return "takeoff"
     if "land" in text:
         return "land"
-
+    
+    # Tratamento para "none" ou falha
     return None
 
 def fix_command(raw_command: str) -> str | None:
+    """
+    Ajusta o comando recebido para o formato técnico esperado.
+    Args:
+        raw_command (str): Comando bruto recebido da IA.
+    Returns:
+        str | None: Comando ajustado ou None se inválido.
+    """
     if not raw_command:
         return None
         
-    parts = raw_command.lower().strip().split()
-    if not parts:
+    clean_text = raw_command.lower().strip()
+    
+    if clean_text == "none" or not clean_text:
         return None
         
+    parts = clean_text.split()
     cmd = parts[0]
 
+    # Comandos de sistema (sem valor)
     if cmd in ['takeoff', 'land']:
         return cmd
 
+    # Tratamento de valor
+    val = 0
+    
+    # Comandos que requerem valor
+    # Caso 1: Comando veio sem número -> Aplica padrão
     if len(parts) == 1:
         if cmd in ['cw', 'ccw']:
-            return f"{cmd} 90"
-        if cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
-            return f"{cmd} 50"
-
-    if len(parts) >= 2:
-        val_str = ''.join(filter(str.isdigit, parts[1]))
-
+            val = 90
+        elif cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
+            val = 50
+    
+    # Caso 2: Comando com número -> Aplica Snapping
+    elif len(parts) >= 2:
+        val_str = ''.join(filter(str.isdigit, parts[1])) # Extrai apenas dígitos
         if not val_str:
-            if cmd in ['cw', 'ccw']:
-                return f"{cmd} 90"
-            else:
-                return f"{cmd} 50"
-
-        val = int(val_str)
-
-        if cmd in ['cw', 'ccw']:
-            val = max(1, min(val, 360))
+            val = 90 if cmd in ['cw', 'ccw'] else 50 # Se falhar em achar número, usa padrão
         else:
-            val = max(20, min(val, 500))
+            val = int(val_str)
 
-        return f"{cmd} {val}"
+    final_val = val
 
-    return None
+    # Rotações: Arredonda para valores aceitos
+    if cmd in ['cw', 'ccw']:
+        val = max(1, min(val, 360)) # Garante limites absolutos antes de arredondar
+        final_val = _snap_to_closest(val, ACCEPTED_ROTATIONS)
+
+    # Movimentos: Arredonda para múltiplos de 10
+    elif cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
+        final_val = int(round(val / 10.0) * 10) # Arredonda para a dezena mais próxima
+        final_val = max(20, min(final_val, 500)) # Garante limites do SDK Tello (20-500)
+
+    return f"{cmd} {final_val}"
 
 def pil_image_to_bytes(image: Image.Image) -> bytes:
     """Converte PIL Image para bytes, redimensionando para performance local."""
@@ -216,7 +281,13 @@ def pil_image_to_bytes(image: Image.Image) -> bytes:
         return buffer.getvalue()
     
 def pil_image_to_base64(image: Image.Image) -> str:
-    """Para DeepSeek/OpenAI"""
+    """
+    Converte uma imagem PIL para uma string base64, para uso com a API OpenAI.
+    Args:
+        image (Image.Image): Imagem PIL.
+    Returns:
+        str: Imagem codificada em base64.
+    """
     img_bytes = pil_image_to_bytes(image)
     return base64.b64encode(img_bytes).decode('utf-8')
 
@@ -263,8 +334,6 @@ def parse_json_response(text_response: str) -> dict:
             "comando": None,
             "continua": False
         }
-
-from PIL import ImageDraw
 
 def add_grid_to_image(image: Image.Image) -> Image.Image:
     """
@@ -358,7 +427,7 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
             format='json', # Verificar se necessário
             options={
                 'temperature': 0.0, # Menor temperatura para menores chances de alucinações
-                'top_p': 0.5,
+                'top_p': 0.9,
                 'num_ctx': 4096,
                 'seed': 42
             }
@@ -379,7 +448,7 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
         # Retorno de segurança
         return f"Erro Local: {str(e)}", None, False
 
-def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
+def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=7) -> tuple[str, str | None, bool]:
     """
     Executa a IA para gerar comandos de controle do drone via Gemini.
     Args:
@@ -387,16 +456,16 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         frame (Image.Image): Frame da câmera do drone.
         step (int): Passo atual na sequência de comandos.
         height (int): Altura atual do drone em cm.
+        max_steps (int): Número máximo de passos permitidos.
     Returns:
         tuple: (resposta natural, comando técnico, continuar rota)
     """
-
     try:
         current_chat = get_chat_session()
         user_text = text if text else 'Analise a cena.'
-        formatted_log = ", ".join(log_messages[-3:]) if log_messages else 'Nenhum.'
+        formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
 
-        system_prompt = get_ai_instruction(user_text, formatted_log, height, step)
+        system_prompt = get_ai_instruction(user_text, formatted_log, height, step, max_steps)
         frame_grid = add_grid_to_image(frame)
 
         response = current_chat.send_message([system_prompt, frame_grid])
@@ -421,32 +490,17 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
     except Exception as e:
         return f"Erro crítico: {str(e)}", None, False
     
-def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
-    """
-    Executa a IA para gerar comandos de controle do drone via OpenAI.
-    Args:
-        text (str | None): Descrição do que o drone deve fazer.
-        frame (Image.Image): Frame da câmera do drone.
-        step (int): Passo atual na sequência de comandos.
-        height (int): Altura atual do drone em cm.
-    Returns:
-        tuple: (resposta natural, comando técnico, continuar rota)
-    """
+def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool]:
     global openai_history
     if not client_openai: return "Erro OpenAI Client.", None, False
 
     try:
         if step == 0:
             reset_openai_history()
-            openai_history.append({
-                "role": "system",
-                "content": "Você é uma IA piloto de Drone. Responda APENAS em JSON."
-            })
+        if not text:
+            text = "Analise a cena."
+        prompt = get_step_prompt(text, last_action, height, step, max_steps)
 
-        user_text = text if text else 'Analise.'
-        hist_cmds = ", ".join(log_messages[-3:])
-        prompt = get_ai_instruction(user_text, hist_cmds, height, step)
-        
         frame_grid = add_grid_to_image(frame)
         base64_img = pil_image_to_base64(frame_grid)
 
@@ -458,7 +512,7 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
                     "type": "image_url",
                     "image_url": {
                         "url": f"data:image/jpeg;base64,{base64_img}",
-                        "detail": "low" # Menos detalhes para performance
+                        "detail": "low"
                     }
                 }
             ]
@@ -470,7 +524,7 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
             messages=openai_history,
             response_format={ "type": "json_object" },
             max_tokens=300,
-            temperature=0.2
+            temperature=0.7,
         )
 
         full_text = response.choices[0].message.content
@@ -478,11 +532,11 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
             return "Erro OpenAI: Resposta vazia.", None, False
         data = parse_json_response(full_text)
 
-        openai_history.append({"role": "assistant", "content": full_text}) # Adiciona resposta ao histórico
-
-        last_user_idx = len(openai_history) - 2 # A penúltima mensagem é a do user
-        if openai_history[last_user_idx]['role'] == 'user':
-            openai_history[last_user_idx]['content'] = f" Prompt: {prompt}"
+        openai_history.append({"role": "assistant", "content": full_text})
+        
+        last_user_index = len(openai_history) - 2
+        if openai_history[last_user_index]['role'] == 'user':
+            openai_history[last_user_index]['content'] = f"[Passo {step}] Prompt: {prompt} | Imagem processada."
 
         chat_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
         return chat_text, data['comando'], data['continua']
@@ -490,8 +544,8 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
     except Exception as e:
         print(f"Erro OpenAI: {e}")
         return f"Erro OpenAI: {str(e)}", None, False
-    
-def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool | None]:
+
+def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool | None]:
     """
     Função Mestra que decide qual IA usar.
     Args:
@@ -499,16 +553,17 @@ def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> 
         frame (Image.Image): Frame da câmera do drone.
         step (int): Passo atual na sequência de comandos.
         height (int): Altura atual do drone em cm.
+        last_action (str): Último comando executado pelo drone.
     Returns:
         tuple: (resposta natural, comando técnico, continuar rota)
     """
     if AI_PROVIDER == 'LOCAL':
         return run_ai_local(text, frame)
     elif AI_PROVIDER == 'OPENAI':
-        return run_ai_openai(text, frame)
+        return run_ai_openai(text, frame, step, height, last_action, max_steps)
     else:
-        return run_ai_gemini(text, frame, step, height)
-    
+        return run_ai_gemini(text, frame, step, height, max_steps)
+
 def validate_command(cmd: str) -> bool:
     """
     Valida o comando recebido.
@@ -517,33 +572,17 @@ def validate_command(cmd: str) -> bool:
     Returns:
         bool: True se o comando for válido, False caso contrário.
     """
-    if not cmd: # Trata comando None ou vazio
-        return False
-        
-    parts = cmd.strip().split() # Divide o comando
-    if not parts:
-        return False
-
-    base_cmd = parts[0].lower()
-
-    if base_cmd not in COMMAND_LIST:
+    if not cmd: return False
+    
+    parts = cmd.lower().split()
+    if not parts or parts[0] not in COMMAND_LIST:
         return False
 
-    # Comandos que requerem um argumento numérico
-    if base_cmd in ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']:
-        if len(parts) != 2:
-            return False
-        try:
-            val = int(parts[1])
-            if base_cmd in ['cw', 'ccw']: # Rotação em graus
-                if not (1 <= val <= 360): return False
-            else: # Movimento em cm
-                if not (10 <= val <= 500): return False
-        except ValueError:
-            return False # Não é um número inteiro
-    # Comandos que não requerem argumento numérico
-    elif base_cmd in ['land', 'takeoff']:
-        if len(parts) != 1:
-            return False
+    base_cmd = parts[0]
 
-    return True
+    # Comandos de Sistema (sem argumento)
+    if base_cmd in ['takeoff', 'land']:
+        return len(parts) == 1
+
+    # Comandos de Movimento/Rotação (precisam de 1 argumento numérico)
+    return len(parts) == 2 and parts[1].isdigit()
