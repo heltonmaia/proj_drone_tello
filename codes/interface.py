@@ -353,35 +353,27 @@ class TelloGUI:
         MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
         current_frame = self._get_frame()
         
-        last_analysis = "Início da missão."
         last_action = "Nenhuma."
 
         try:
             for step in range(MAX_STEPS):
-                current_frame = self._get_frame() # Pega o frame mais recente no inicio do loop
-                if step == 0:
-                    prompt_text = user_text
-                else:
-                    prompt_text = (
-                        f"OBJETIVO GLOBAL: {user_text}. "
-                        f"SITUAÇÃO ANTERIOR: {last_analysis}. "
-                        f"AÇÃO EXECUTADA: {last_action}. "
-                        f"O que fazer agora?"
-                    )
+                current_frame = self._get_frame()
+                
+                prompt_text = user_text
 
+                # Chamada atualizada passando last_action
                 response, command, continue_route = chatbot.run_ai(
-                    prompt_text,
-                    current_frame,
-                    step,
-                    self.drone_height
+                    text=prompt_text,
+                    frame=current_frame,
+                    step=step,
+                    height=self.drone_height,
+                    last_action=last_action,
+                    max_steps=MAX_STEPS
                 )
 
                 # Atualiza UI
                 display_text = user_text if step == 0 else f"Sequência de comandos, passo {step + 1}/{MAX_STEPS}"
                 self.root.after(0, self.update_chat_display, display_text, response)
-
-                # Extrai a análise para entender o cenário
-                last_analysis = response[:200]
 
                 if command and chatbot.validate_command(command):
                     last_action = command
