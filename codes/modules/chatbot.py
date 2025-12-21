@@ -8,13 +8,14 @@ import re
 import base64
 import json
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from modules import utils
 from modules.tello_control import log_messages
 
 AI_PROVIDER = 'GEMINI'
-# AI_PROVIDER = 'LOCAL'
-# AI_PROVIDER = 'OPENAI'
+#AI_PROVIDER = 'LOCAL'
+#AI_PROVIDER = 'OPENAI'
 LOCAL_MODEL_NAME = 'minicpm-v:8b'
 GEMINI_MODEL_NAME = 'gemini-2.5-flash'
 OPENAI_MODEL_NAME = 'gpt-4o-mini'
@@ -27,7 +28,7 @@ SYSTEM_INSTRUCTION_TEXT = f"""
 VOCÊ É UM PILOTO DE DRONE TELLO.
 Comandos válidos: {COMMAND_LIST}
 Argumentos numéricos em cm [20-500] ou graus [1-360].
-Exemplos: 'forward 100', 'cw 90', 'takeoff', 'land'.
+Exemplos: 'forward 100', 'cw 90', 'up 50', 'takeoff', 'land'.
 
 SAÍDA OBRIGATÓRIA EM JSON:
 {{
@@ -37,7 +38,7 @@ SAÍDA OBRIGATÓRIA EM JSON:
     "continua": boolean (true se a missão não acabou)
 }}
 """
-openai_history = []
+openai_history: list[ChatCompletionMessageParam] = []
 
 utils.configure_generative_ai()
 config = GenerationConfig(
@@ -81,9 +82,14 @@ def get_chat_session():
     return chat_session_gemini
 
 def reset_openai_history():
-    """Limpa o histórico da OpenAI para iniciar nova missão."""
+    """Limpa o histórico e define a persona do sistema."""
     global openai_history
-    openai_history = []
+    openai_history = [
+        {
+            "role": "system",
+            "content": SYSTEM_INSTRUCTION_TEXT
+        }
+    ]
 
 def get_model_name():
     """
@@ -367,85 +373,62 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
         tuple: (resposta formatada, comando técnico)
     """
     try:
-        user_text = text if text else 'No objective provided. Analyze the scene.'
+        user_objective = text if text else 'Analise a cena e aguarde instruções.'
 
-        system_prompt = f"""
-            You are a DRONE PILOT AI.
-            User Input: "{user_text}"
+        system_rules = f"""You are a TELLO DRONE PILOT. 
+        COMMANDS: {COMMAND_LIST}.
+        FORMAT: direction [value] (e.g., 'forward 50', 'cw 90').
+        JSON OUTPUT ONLY:
+        {{
+            "analise": "string (descrição em português)",
+            "plano": "string (intenção em português)",
+            "comando": "string (technical command)",
+            "continua": false
+        }}
+        """
 
-            TASK: Analyze the image and the input. Generate a flight command.
-            
-            RULES:
-            1. Output MUST be valid JSON.
-            2. "analise" and "plano" must be in Portuguese.
-            3. "comando" must be technical: [direction] [value].
-            4. Valid directions: up, down, forward, back, left, right, cw, ccw.
-            5. If path is blocked or no action needed, command is "none".
-
-            ### EXAMPLES (Follow this pattern):
-            ### EXAMPLE 1
-            Input: "Vá para a frente"
-            Image: (Clear path)
-            {{
-                "analise": "Caminho livre à frente, sem obstáculos visíveis.",
-                "plano": "Avançar 100cm com segurança.",
-                "comando": "forward 100",
-            }}
-            ### EXAMPLE 2
-            Input: "Suba um pouco"
-            Image: (Ceiling is far)
-            {{
-                "analise": "O teto está alto, posso subir.",
-                "plano": "Subir 50cm para ajustar altura.",
-                "comando": "up 50",
-            }}
-            ### EXAMPLE 3
-            Input: "Vire para a porta"
-            Image: (Door is on the right)
-            {{
-                "analise": "Vejo a porta à direita da imagem.",
-                "plano": "Girar 90 graus para alinhar com a porta.",
-                "comando": "cw 90",
-            }}
-            ### END EXAMPLES
-            """
+        user_prompt = f"""USER COMMAND: "{user_objective}"
         
-        # Converte imagem
+        INSTRUCTION: Look at the image and execute the USER COMMAND.
+        - If blocked: "none".
+        - If rotation is needed: use 'cw' or 'ccw'.
+        - Move safely (20-100cm per step).
+
+        Remember: Respond ONLY with the JSON object."""
+
         frame_grid = add_grid_to_image(frame)
         img_bytes = pil_image_to_bytes(frame_grid)
 
-        # Chamada ao Ollama
         response = ollama.chat(
             model=LOCAL_MODEL_NAME,
             messages=[
                 {
+                    'role': 'system',
+                    'content': system_rules
+                },
+                {
                     'role': 'user',
-                    'content': system_prompt,
+                    'content': user_prompt,
                     'images': [img_bytes]
                 }
             ],
-            format='json', # Verificar se necessário
             options={
-                'temperature': 0.0, # Menor temperatura para menores chances de alucinações
+                'temperature': 0.0,
+                'num_predict': 256, # Limita para evitar alucinações longas
                 'top_p': 0.9,
-                'num_ctx': 4096,
                 'seed': 42
             }
         )
         
         full_response_text = response['message']['content']
-
-        # Usa o parser unificado criado anteriormente
         data = parse_json_response(full_response_text)
 
-        # Formata o texto para exibição no chat da interface
         chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}"
         return chat_display_text, data['comando'], False
 
     except Exception as e:
         error_details = traceback.format_exc()
         print(f"DEBUG: Erro em run_ai_local: {str(e)}\n{error_details}")
-        # Retorno de segurança
         return f"Erro Local: {str(e)}", None, False
 
 def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=7) -> tuple[str, str | None, bool]:
@@ -504,7 +487,7 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
         frame_grid = add_grid_to_image(frame)
         base64_img = pil_image_to_base64(frame_grid)
 
-        current_user_msg = {
+        current_user_msg: ChatCompletionMessageParam = {
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
@@ -538,7 +521,7 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
         if openai_history[last_user_index]['role'] == 'user':
             openai_history[last_user_index]['content'] = f"[Passo {step}] Prompt: {prompt} | Imagem processada."
 
-        chat_text = f"Análise: {data['analise']}\nPlano: {data['plano']}"
+        chat_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}\nContinuar: {data['continua']}"
         return chat_text, data['comando'], data['continua']
 
     except Exception as e:
