@@ -49,7 +49,7 @@ class TelloGUI:
             return
 
         self.command_log = tello_control.log_messages
-        #self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        # self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
@@ -120,7 +120,7 @@ class TelloGUI:
         self.response_text_ai = tk.Text(
             self.ai_response_frame,
             wrap="word",
-            height=12,
+            height=8,
             state="disabled", # Começa como somente leitura
             font=("Ubuntu", 12),
             bg=LBF_COLOR,
@@ -186,6 +186,11 @@ class TelloGUI:
         log_frame = ttk.Frame(sidebar_frame)
         log_frame.pack(fill='both', expand=True, padx=5, pady=5)
         ttk.Label(log_frame, text="Log").pack(anchor="w")
+
+        model_frame = ttk.Frame(sidebar_frame)
+        model_frame.pack(fill='x', padx=5, pady=(0,5))
+        model_name = chatbot.get_model_name()
+        ttk.Label(model_frame, text="Modelo: " + model_name).pack(anchor="w")
         
         self.log_listbox = tk.Listbox(log_frame, height=10)
         self.log_listbox.pack(fill='both', expand=True, side='left')
@@ -263,111 +268,135 @@ class TelloGUI:
         new_max_steps = self.max_steps_input.get()
         if new_max_steps.isdigit():
             self.max_steps = int(new_max_steps)
-            print(f"Número máximos de passos atualizado para: {self.max_steps}")
+        self.show_message("Atualização", f"Número máximo de passos definido para: {self.max_steps}")
 
     def clear_logs(self) -> None:
         """Limpa o log de comandos"""
         self.command_log.clear()
         tello_control.log_messages.clear()
         self.log_listbox.delete(0, tk.END)
-        print("Logs limpos.")
+        self.show_message("Log", "Log de comandos limpo.")
 
     def send_ai_command(self) -> None:
         """Prepara e inicia a sequência de comandos da IA em uma thread gerenciadora."""
         if self.is_sequence_running:
-            print("Aviso: Sequência de IA já em andamento.")
+            self.show_message("Atenção", "Uma sequência já está em execução. Por favor, aguarde.")
             return
 
         user_text = self.text_input_entry.get()
-        frame = self.img_ai
 
         self.text_input_entry.delete(0, tk.END) # Limpa a caixa de entrada de texto
 
         threading.Thread(
             target=self._execute_ai_sequence,
-            args=(user_text, frame),
+            args=(user_text,),
             daemon=True
         ).start()
 
-    def _extract_tag_content(self, text: str, tag: str) -> str:
-        """Extrai conteúdo de uma tag de forma segura, limpando colchetes seguintes."""
-        if tag not in text:
-            return ""
+    def _get_frame(self) -> Image.Image:
+        """
+        Captura frame mais recente direto da thread de vídeo.
+        Returns:
+            Image.Image: O frame atual como uma imagem PIL.
+        """
         try:
-            # Pega tudo depois da tag
-            content = text.split(tag)[1]
-            # Se houver outra tag de abertura '[' depois, corta nela
-            if "[" in content:
-                content = content.split("[")[0]
-            return content.strip()
-        except:
-            return ""
+            if hasattr(self.tello, 'frame') and isinstance(self.tello.frame, np.ndarray):
+                if self.tello.frame.size > 0:
+                    frame = self.tello.frame.copy()
+                    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    return Image.fromarray(img_rgb)
+            # ret, frame = self.webcam.read()
+            # if ret:
+            #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            #     return Image.fromarray(img_rgb)
+        except Exception:
+            pass
+    
+        if hasattr(self, 'img_ai') and self.img_ai:
+            return self.img_ai
+        return Image.new('RGB', (640, 480), color='black')
+    
+    def _calculate_wait_time(self, command: str) -> float:
+        """
+        Calcula quanto tempo esperar baseado na física do drone.
+        Args:
+            command (str): O comando enviado ao drone.
+        Returns:
+            float: Tempo estimado em segundos para o comando completar.
+        """
+        if not command: return 1.0
+        
+        parts = command.split()
+        cmd = parts[0].lower()
+        val = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
 
-    def _execute_ai_sequence(self, user_text: str, initial_frame: Image.Image) -> None:
+        # Rotações são lentas. ~2s para 90 graus é uma margem segura + estabilização
+        if cmd in ['cw', 'ccw']:
+            return (val / 90.0) * 1.5 + 1.5
+        
+        # Movimentos lineares
+        if cmd in ['forward', 'back', 'left', 'right', 'up', 'down']:
+            return (val / 100.0) * 1.0 + 1.5 # 1s a cada 100cm + 1.5s de inércia
+            
+        return 3.0 # Takeoff/Land
+
+    def _execute_ai_sequence(self, user_text: str) -> None:
         """
         Roda em uma thread e gerencia o loop de múltiplos passos.
         Args:
             user_text (str): A entrada de texto do usuário.
-            initial_frame (Image.Image): O frame inicial da câmera.
         """
         self.is_sequence_running = True
         self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True)
 
-        MAX_STEPS = 1 if chatbot.USE_LOCAL_AI else int(self.max_steps)
-        current_frame = initial_frame
+        MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
+        current_frame = self._get_frame()
         
-        last_analysis = "Início da missão."
         last_action = "Nenhuma."
 
         try:
             for step in range(MAX_STEPS):
-                if step == 0:
-                    prompt_text = user_text
-                else:
-                    prompt_text = (
-                        f"OBJETIVO GLOBAL: {user_text}. "
-                        f"SITUAÇÃO ANTERIOR: {last_analysis}. "
-                        f"AÇÃO EXECUTADA: {last_action}. "
-                        f"O que fazer agora?"
-                    )
+                current_frame = self._get_frame()
+                
+                prompt_text = user_text
 
+                # Chamada atualizada passando last_action
                 response, command, continue_route = chatbot.run_ai(
-                    prompt_text,
-                    current_frame,
-                    step,
-                    self.drone_height
+                    text=prompt_text,
+                    frame=current_frame,
+                    step=step,
+                    height=self.drone_height,
+                    last_action=last_action,
+                    max_steps=MAX_STEPS
                 )
 
                 # Atualiza UI
-                display_text = user_text if step == 0 else f"Step {step + 1}"
+                display_text = user_text if step == 0 else f"Sequência de comandos, passo {step + 1}/{MAX_STEPS}"
                 self.root.after(0, self.update_chat_display, display_text, response)
 
-                # Extrai a análise para entender o cenário
-                extracted_analysis = self._extract_tag_content(response, "[ANÁLISE]")
-                if extracted_analysis:
-                    last_analysis = extracted_analysis[:150] # Limita tamanho
-
-                # Extrai o comando para saber o que foi decidido
-                if command:
-                    last_action = command
-                else:
-                    last_action = "Nenhum comando gerado."
-
                 if command and chatbot.validate_command(command):
+                    last_action = command
                     tello_control.process_ai_command(self.tello, command)
                     self.root.after(0, self.update_log, f'{step + 1}: {command}')
+                    
+                    wait_time = self._calculate_wait_time(command)
+                    
+                    was_interrupted = self.abort_sequence_event.wait(wait_time)
+                    if was_interrupted:
+                        print("Sequência abortada durante espera.")
+                        break
                 else:
+                    last_action = "Nenhum comando."
                     print(f"Sem comando válido no passo {step}.")
                     if not continue_route: break
 
                 if not continue_route:
                     break
                 
-                was_interrupted = self.abort_sequence_event.wait(3)
-                if was_interrupted: break
-                
-                current_frame = self.img_ai
+                # Se não houve comando (apenas análise), espera um pouco menos antes do próximo loop
+                if not command:
+                    if self.abort_sequence_event.wait(2): break
 
         except Exception as e:
             print(f"Erro seq: {e}")
@@ -473,11 +502,11 @@ class TelloGUI:
         """
         Atualiza os labels do chat, agora usando um widget Text para a resposta da IA.
         """
-        self.response_label_user.config(text=f"Você: {user_msg}")
+        self.response_label_user.config(text=user_msg)
 
         self.response_text_ai.config(state="normal")
         self.response_text_ai.delete("1.0", tk.END)
-        self.response_text_ai.insert(tk.END, f"Drone: {ai_msg}")
+        self.response_text_ai.insert(tk.END, ai_msg)
         self.response_text_ai.config(state="disabled")
         self.response_text_ai.see(tk.END)
 
@@ -546,10 +575,10 @@ class TelloGUI:
 
     def emergency_stop(self) -> None:
         """Função para parar imediatamente o drone."""
-        self.tello.send_cmd('stop')
+        # self.tello.send_cmd('stop')
         if self.abort_sequence_event:
             self.abort_sequence_event.set()
-        print("Comando de emergência enviado ao drone.")
+            print("Comando de emergência enviado ao drone.")
 
     def _exit(self) -> None:
         """Função chamada ao fechar a janela."""
