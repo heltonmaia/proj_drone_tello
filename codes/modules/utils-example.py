@@ -1,17 +1,18 @@
 """
-Crie sua chave aqui: https://aistudio.google.com/apikey.
-Substitua 'sua_chave_api_aqui' pela sua chave de API real
-Você pode armazenar a chave em um arquivo de configuração ou variável de ambiente
-para maior segurança
-e evitar expô-la diretamente no código.
+Crie sua chave do Gemini aqui: https://aistudio.google.com/apikey.
+A chave da OpenAI pode ser criada em: https://platform.openai.com/account/api-keys.
+Cole as chaves nas variáveis OPENAI_KEY e GEMINI_KEY abaixo.
 """
 import google.generativeai as genai
 
+GEMINI_KEY = 'chave_gemini_aqui'
+OPENAI_KEY = 'chave_openai_aqui'
+
 def configure_generative_ai():
-    """
-    Configura a chave da API do Google GenerativeAI.
-    Args:
-        api_key: Chave da API.
-    """
-    genai.configure(api_key='sua_chave_api_aqui')
+    """Configura a chave da API do Google GenerativeAI."""
+    genai.configure(api_key=GEMINI_KEY)
+
+def get_openai_key():
+    """Retorna a chave da OpenAI para uso em outros módulos."""
+    return OPENAI_KEY
 
