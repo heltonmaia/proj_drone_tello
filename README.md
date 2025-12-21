@@ -18,9 +18,9 @@ O sistema utiliza uma arquitetura de IA híbrida que combina processamento de im
 
 * **Visão Espacial Auxiliada (Grid Overlay):** Antes do envio para a IA, cada frame da câmera recebe uma sobreposição de grade 3x3, fornecendo ao modelo uma referência geométrica para melhor percepção de distância e centralização de objetos.
 * **Controle de Execução e Segurança:**
-* **Cálculo de Inércia:** O sistema calcula automaticamente o tempo de espera necessário para cada comando (rotações vs. translações) antes de capturar o próximo frame para análise.
-* **Abortagem Instantânea:** Interface com suporte a interrupção de sequências em tempo real via sinalizadores de eventos (`abort_sequence_event`).
-* **Validação de Comandos:** Filtro rigoroso (`fix_command` e `_snap_to_closest`) que ajusta as saídas da IA para valores aceitos pelo SDK da Tello (ex: arredondamento de ângulos e limites de distância).
+    * **Cálculo de Inércia:** O sistema calcula automaticamente o tempo de espera necessário para cada comando (rotações vs. translações) antes de capturar o próximo frame para análise.
+    * **Abortagem Instantânea:** Interface com suporte a interrupção de sequências em tempo real via sinalizadores de eventos (`abort_sequence_event`).
+    * **Validação de Comandos:** Filtro rigoroso (`fix_command` e `_snap_to_closest`) que ajusta as saídas da IA para valores aceitos pelo SDK da Tello (ex: arredondamento de ângulos e limites de distância).
 
 ## **Capacidades da IA por Provedor**
 
