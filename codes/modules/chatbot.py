@@ -1,19 +1,72 @@
 import google.generativeai as genai
-from PIL import Image
+from google.generativeai.types import GenerationConfig
+from PIL import Image, ImageDraw
 import traceback
+import ollama
+import io
+import re
+import base64
+import json
+from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from modules import utils
 from modules.tello_control import log_messages
 
-utils.configure_generative_ai()
-model = genai.GenerativeModel(model_name='gemini-1.5-flash') # type: ignore
-
-# Variável global para armazenar o objeto da sessão de chat
-chat_session = None
-
+AI_PROVIDER = 'GEMINI'
+#AI_PROVIDER = 'LOCAL'
+#AI_PROVIDER = 'OPENAI'
+LOCAL_MODEL_NAME = 'minicpm-v:8b'
+GEMINI_MODEL_NAME = 'gemini-2.5-flash'
+OPENAI_MODEL_NAME = 'gpt-4o-mini'
+OPENAI_API_KEY = utils.get_openai_key()
+ACCEPTED_ROTATIONS = [10, 15, 30, 45, 90, 135, 180, 360]
 COMMAND_LIST = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
 ]
+SYSTEM_INSTRUCTION_TEXT = f"""
+VOCÊ É UM PILOTO DE DRONE TELLO.
+Comandos válidos: {COMMAND_LIST}
+Argumentos numéricos em cm [20-500] ou graus [1-360].
+Exemplos: 'forward 100', 'cw 90', 'up 50', 'takeoff', 'land'.
+
+SAÍDA OBRIGATÓRIA EM JSON:
+{{
+    "analise": "Breve descrição visual e do status em português.",
+    "plano": "O que fará a seguir.",
+    "comando": "comando valor" (ou "none"),
+    "continua": boolean (true se a missão não acabou)
+}}
+"""
+openai_history: list[ChatCompletionMessageParam] = []
+
+utils.configure_generative_ai()
+config = GenerationConfig(
+    temperature=0.7,
+    top_p=0.95,
+    top_k=40,
+    max_output_tokens=2048, # Limita o tamanho da resposta para não gastar tempo/tokens
+    response_mime_type="application/json"
+)
+
+# Passa a config na inicialização do modelo
+model_gemini = genai.GenerativeModel( # type: ignore
+    model_name=GEMINI_MODEL_NAME,
+    generation_config=config,
+)
+
+client_openai = None
+if AI_PROVIDER == 'OPENAI':
+    if not OPENAI_API_KEY:
+        print("ERRO: OPENAI_API_KEY não encontrada no utils")
+    else:
+        try:
+            client_openai = OpenAI(api_key=OPENAI_API_KEY)
+        except Exception as e:
+            print(f"Erro ao configurar OpenAI: {e}")
+
+# Variável global para armazenar o objeto da sessão de chat
+chat_session_gemini = None
 
 def get_chat_session():
     """
@@ -22,124 +75,478 @@ def get_chat_session():
     Returns:
         ChatSession: A sessão de chat.
     """
-    global chat_session
-    if chat_session is None:
-        chat_session = model.start_chat(history=[])
+    global chat_session_gemini
+    if chat_session_gemini is None:
+        chat_session_gemini = model_gemini.start_chat(history=[])
         print('Sessão de chat iniciada.')
-    return chat_session
+    return chat_session_gemini
 
-def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0) -> tuple[str, str | None, bool]:
+def reset_openai_history():
+    """Limpa o histórico e define a persona do sistema."""
+    global openai_history
+    openai_history = [
+        {
+            "role": "system",
+            "content": SYSTEM_INSTRUCTION_TEXT
+        }
+    ]
+
+def get_model_name():
     """
-    Executa a IA para gerar comandos de controle do drone.
+    Retorna o nome do modelo de IA atualmente em uso.
+    Returns:
+        str: Nome do modelo.
+    """
+    if AI_PROVIDER == 'LOCAL':
+        return LOCAL_MODEL_NAME
+    elif AI_PROVIDER == 'OPENAI':
+        return OPENAI_MODEL_NAME
+    else:
+        return GEMINI_MODEL_NAME
+
+def get_ai_instruction(objective: str, history: str, height: int, step: int, max_steps: int) -> str:
+    """
+    Gera o prompt para a IA com base no contexto atual.
+    Args:
+        objective (str): Objetivo da missão.
+        history (str): Histórico de comandos.
+        height (int): Altura atual do drone em cm.
+        step (int): Passo atual na sequência de comandos.
+    Returns:
+        str: Instrução formatada para a IA.
+    """
+    if step == 0:
+        return f"""
+            ATUAR COMO PILOTO DE DRONE TELLO (Simulação Lógica).
+            Objetivo: {objective}
+            Histórico: {history}
+            Comandos válidos: {COMMAND_LIST}
+            Altura do drone: {height} (10cm geralmente significa que está no chão)
+
+            Comandos de voo requerem argumento numérico em cm: forward 20 (para frente 20cm)
+            Comandos de rotação em graus: cw 90 (girar sentido horário 90 graus)
+            Comandos que não precisam de argumento: [takeoff, land]
+            Valores dos argumentos devem estar entre: [20, 500], representam a distância em cm (movimentos) ou graus [1-360] (rotações)
+            Avalie se é necessário continuar a missão, se não for necessário: "continua": false
+
+            SAÍDA OBRIGATÓRIA EM JSON:
+            {{
+                "analise": "Explicação breve da situação e obstáculos em português.",
+                "plano": "1. Passo atual, 2. Próximo passo",
+                "comando": "comando valor" (ex: "forward 100" ou "none"),
+                "continua": boolean (true se a missão não acabou, false se acabou)
+            }}
+            """
+    else:
+        return f"""
+            CONTINUAÇÃO DA MISSÃO.
+            Objetivo: {objective}
+            Histórico: {history}
+            Altura: {height} cm
+            Passo: {step}/{max_steps}
+
+            Comandos válidos: {COMMAND_LIST}
+
+            SAÍDA OBRIGATÓRIA EM JSON:
+            {{
+                "analise": "Explicação breve da situação e obstáculos em português.",
+                "plano": "2 próximos passos",
+                "comando": "comando valor" (ex: "forward 100" ou "none"),
+                "continua": boolean (true se a missão não acabou, false se acabou)
+            }}
+            """
+    
+def get_step_prompt(objective: str, last_action: str, height: int, step: int, max_steps: int) -> str:
+    """
+    Gera apenas o delta do prompt para o passo atual.
+    Args:
+        objective (str): Objetivo da missão.
+        last_action (str): Última ação executada pelo drone.
+        height (int): Altura atual do drone em cm.
+        step (int): Passo atual na sequência de comandos.
+        max_steps (int): Número máximo de passos permitidos.
+    Returns:
+        str: Prompt formatado para o passo atual.
+    """
+    return f"""
+    STATUS ATUAL:
+    - Objetivo Global: "{objective}"
+    - Passo: {step + 1}/{max_steps}
+    - Altura: {height} cm
+    - Última Ação Executada: "{last_action}"
+    
+    Analise a imagem atual e determine o próximo comando.
+    Siga a formatação JSON obrigatória.
+    """
+
+def _snap_to_closest(value: int, allowed_values: list[int]) -> int:
+    """
+    Encontra o valor mais próximo dentro de uma lista de permitidos.
+    Args:
+        value (int): Valor a ser ajustado.
+        allowed_values (list[int]): Lista de valores permitidos.
+    Returns:
+        int: Valor ajustado mais próximo.
+    """
+    return min(allowed_values, key=lambda x: abs(x - value))
+
+def extract_command(text: str) -> str | None:
+    """
+    Extrai comandos em qualquer posição da linha.
+    Args:
+        text (str): Texto bruto.
+    Returns:
+        str | None: Comando extraído ou None se inválido.
+    """
+    if not text: return None
+    text = text.lower()
+
+    pattern = r'(up|down|left|right|forward|back|cw|ccw)[^\d]*(\d+)'
+    match = re.search(pattern, text)
+    
+    if match:
+        cmd = match.group(1)
+        val = match.group(2)
+        return f"{cmd} {val}"
+
+    # Comandos sem valor
+    if "takeoff" in text:
+        return "takeoff"
+    if "land" in text:
+        return "land"
+    
+    # Tratamento para "none" ou falha
+    return None
+
+def fix_command(raw_command: str) -> str | None:
+    """
+    Ajusta o comando recebido para o formato técnico esperado.
+    Args:
+        raw_command (str): Comando bruto recebido da IA.
+    Returns:
+        str | None: Comando ajustado ou None se inválido.
+    """
+    if not raw_command:
+        return None
+        
+    clean_text = raw_command.lower().strip()
+    
+    if clean_text == "none" or not clean_text:
+        return None
+        
+    parts = clean_text.split()
+    cmd = parts[0]
+
+    # Comandos de sistema (sem valor)
+    if cmd in ['takeoff', 'land']:
+        return cmd
+
+    # Tratamento de valor
+    val = 0
+    
+    # Comandos que requerem valor
+    # Caso 1: Comando veio sem número -> Aplica padrão
+    if len(parts) == 1:
+        if cmd in ['cw', 'ccw']:
+            val = 90
+        elif cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
+            val = 50
+    
+    # Caso 2: Comando com número -> Aplica Snapping
+    elif len(parts) >= 2:
+        val_str = ''.join(filter(str.isdigit, parts[1])) # Extrai apenas dígitos
+        if not val_str:
+            val = 90 if cmd in ['cw', 'ccw'] else 50 # Se falhar em achar número, usa padrão
+        else:
+            val = int(val_str)
+
+    final_val = val
+
+    # Rotações: Arredonda para valores aceitos
+    if cmd in ['cw', 'ccw']:
+        val = max(1, min(val, 360)) # Garante limites absolutos antes de arredondar
+        final_val = _snap_to_closest(val, ACCEPTED_ROTATIONS)
+
+    # Movimentos: Arredonda para múltiplos de 10
+    elif cmd in ['up', 'down', 'left', 'right', 'forward', 'back']:
+        final_val = int(round(val / 10.0) * 10) # Arredonda para a dezena mais próxima
+        final_val = max(20, min(final_val, 500)) # Garante limites do SDK Tello (20-500)
+
+    return f"{cmd} {final_val}"
+
+def pil_image_to_bytes(image: Image.Image) -> bytes:
+    """Converte PIL Image para bytes, redimensionando para performance local."""
+    base_width = 640
+    w_percent = (base_width / float(image.size[0]))
+    h_size = int((float(image.size[1]) * float(w_percent)))
+    
+    img_resized = image.resize((base_width, h_size), Image.Resampling.LANCZOS)
+    
+    with io.BytesIO() as buffer:
+        img_resized.save(buffer, format="JPEG", quality=80)
+        return buffer.getvalue()
+    
+def pil_image_to_base64(image: Image.Image) -> str:
+    """
+    Converte uma imagem PIL para uma string base64, para uso com a API OpenAI.
+    Args:
+        image (Image.Image): Imagem PIL.
+    Returns:
+        str: Imagem codificada em base64.
+    """
+    img_bytes = pil_image_to_bytes(image)
+    return base64.b64encode(img_bytes).decode('utf-8')
+
+def parse_json_response(text_response: str) -> dict:
+    """
+    Função unificada para parsear respostas JSON de qualquer provedor de IA.
+    Args:
+        text_response (str): Resposta em texto da IA.
+    Returns:
+        dict: Dicionário com os campos esperados.
+    """
+    try:
+        text_response = text_response.strip()
+        
+        # Limpeza de markdown se houver
+        if "```json" in text_response:
+            text_response = text_response.split("```json")[1].split("```")[0]
+        elif "```" in text_response:
+             text_response = text_response.split("```")[1].split("```")[0]
+        
+        # Tenta carregar o JSON
+        data = json.loads(text_response)
+        
+        return {
+            "analise": data.get("analise", "Sem análise."),
+            "plano": data.get("plano", ""),
+            "comando": fix_command(data.get("comando")),
+            "continua": data.get("continua", False)
+        }
+    except json.JSONDecodeError as e:
+        print(f"ERRO JSON: {e}")
+        print(f"Texto recebido (Raw): {text_response}")
+        
+        # Retorno de segurança para não travar a UI
+        return {
+            "analise": "Erro na comunicação (JSON Inválido). Tentando estabilizar.",
+            "comando": "none",
+            "continua": False
+        }
+    except Exception as e:
+        print(f"Erro genérico no parse: {e}")
+        return {
+            "analise": f"Erro: {str(e)}",
+            "comando": None,
+            "continua": False
+        }
+
+def add_grid_to_image(image: Image.Image) -> Image.Image:
+    """
+    Desenha um grid 3x3 na imagem para ajudar a IA na noção espacial.
+    Args:
+        image (Image.Image): Imagem original.
+    Returns:
+        Image.Image: Imagem com grid desenhado.
+    """
+    img = image.copy()
+    draw = ImageDraw.Draw(img)
+    width, height = img.size
+    
+    # Linhas Verticais (dividir em 3)
+    draw.line([(width/3, 0), (width/3, height)], fill="red", width=1)
+    draw.line([(2*width/3, 0), (2*width/3, height)], fill="red", width=1)
+    
+    # Linhas Horizontais (dividir em 3)
+    draw.line([(0, height/3), (width, height/3)], fill="red", width=1)
+    draw.line([(0, 2*height/3), (width, 2*height/3)], fill="red", width=1)
+    
+    return img
+
+def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None, bool]:
+    """
+    Executa a IA localmente com Ollama retornando JSON.
     Args:
         text (str | None): Descrição do que o drone deve fazer.
-        frame (Image.Image): Frame da câmera atual.
-        step (int): Passo atual na sequência de comandos.
-        height (int): Altura atual do drone em cm.
+        frame (Image.Image): Frame da câmera do drone.
     Returns:
-        tuple: (resposta natural, comando técnico, continuar rota)
+        tuple: (resposta formatada, comando técnico)
     """
-
     try:
-        current_chat = get_chat_session()
+        user_objective = text if text else 'Analise a cena e aguarde instruções.'
+
+        system_rules = f"""You are a TELLO DRONE PILOT. 
+        COMMANDS: {COMMAND_LIST}.
+        FORMAT: direction [value] (e.g., 'forward 50', 'cw 90').
+        JSON OUTPUT ONLY:
+        {{
+            "analise": "string (descrição em português)",
+            "plano": "string (intenção em português)",
+            "comando": "string (technical command)",
+            "continua": false
+        }}
+        """
+
+        user_prompt = f"""USER COMMAND: "{user_objective}"
         
-        user_text = text if text else 'Nenhum objetivo fornecido. Analise a cena e sugira uma ação segura.'
+        INSTRUCTION: Look at the image and execute the USER COMMAND.
+        - If blocked: "none".
+        - If rotation is needed: use 'cw' or 'ccw'.
+        - Move safely (20-100cm per step).
 
-        formatted_log_messages = ", ".join(log_messages) if log_messages else 'Nenhum comando enviado.'
+        Remember: Respond ONLY with the JSON object."""
 
-        if step == 0:
-            system_prompt = f"""
-                ANÁLISE DE CENA E COMANDO PARA DRONE
+        frame_grid = add_grid_to_image(frame)
+        img_bytes = pil_image_to_bytes(frame_grid)
 
-                Contexto:
-                - Você é um sistema de IA avançado controlando um drone Tello. Sua missão é navegar em um ambiente interno para cumprir um objetivo.
-                - Comandos disponíveis: {COMMAND_LIST}
-                - Comandos enviados até agora: {formatted_log_messages}
-                - Altura do drone: {height} cm. Normalmente, por imprecisão, 10cm significa que ele está no chão.
-
-                Objetivo Principal:
-                {user_text}
-
-                Instruções de Raciocínio Passo a Passo:
-                1.  Observar: Analise a imagem atual. Onde estão os principais objetos? Onde estão os obstáculos?
-                2.  Orientar: Compare sua observação com o 'Objetivo Principal'. O drone está virado para a direção certa? Se o objetivo é 'ir para a cadeira' e a cadeira está à sua direita, a primeira ação DEVE ser girar para a direita.
-                3.  Planejar: Crie um plano simples com os próximos 1-2 movimentos para se aproximar do objetivo. O plano deve ser seguro.
-                4.  Decidir: Com base no seu plano, escolha APENAS o primeiro comando a ser executado AGORA.
-                Obs:
-                1. Comandos de movimento obrigatoriamente necessitam da distância ou ângulo (ex: "forward 100", "ccw 90") (de 10 a 500). Comandos sem parâmetros (ex: "takeoff", "land") não necessitam.
-                2. Sinalizar: Se o seu plano tem mais de um passo, adicione a linha "[CONTINUA]". Se este comando único completa a tarefa, omita a linha.
-                3. A imagem que você vê é uma foto enviada no momento do envio de cada comando.
-
-                Exemplo de Raciocínio para "vá para a mesa":
-                [ANÁLISE] Vejo uma mesa à minha esquerda e uma parede em frente.
-                [PLANO] 1. Girar 90 graus para a esquerda (ccw 90) para encarar a mesa. 2. Avançar em direção à mesa (forward 100).
-                [DECISÃO] ccw 90
-                [JUSTIFICATIVA] Estou girando para alinhar o drone com o objetivo antes de avançar.
-                [CONTINUA]
-
-                Formato Obrigatório da Resposta:
-                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [JUSTIFICATIVA] Explicação da sua decisão.
-                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
-                """
-        else:
-            system_prompt = f"""
-                CONTINUAÇÃO DE COMANDO
-                Você sinalizou que sua tarefa não estava completa. Continue seu raciocínio e planejamento com base na imagem atual.
-                Lembre-se de revisar o 'Objetivo Principal' e ajustar seu plano conforme necessário.
-                Objetivo Principal:
-                {user_text}
-                Comandos enviados até agora: {formatted_log_messages}
-                Altura: {height} cm.
-                Forneça sua próxima decisão de comando seguindo o mesmo formato rigoroso.
-                Formato Obrigatório da Resposta:
-                [ANÁLISE] Descrição da cena e sua orientação em relação ao objetivo.
-                [PLANO] Seu plano de 1 a 2 passos para alcançar o objetivo.
-                [DECISÃO] O comando técnico exato para o PRIMEIRO passo do seu plano.
-                [JUSTIFICATIVA] Explicação da sua decisão.
-                [CONTINUA] Opcional. Adicione esta linha apenas se o seu plano tiver mais passos.
-                """
-
-        # Constrói o prompt para o turno atual.
-        content_for_turn = [system_prompt, frame]
+        response = ollama.chat(
+            model=LOCAL_MODEL_NAME,
+            messages=[
+                {
+                    'role': 'system',
+                    'content': system_rules
+                },
+                {
+                    'role': 'user',
+                    'content': user_prompt,
+                    'images': [img_bytes]
+                }
+            ],
+            options={
+                'temperature': 0.0,
+                'num_predict': 256, # Limita para evitar alucinações longas
+                'top_p': 0.9,
+                'seed': 42
+            }
+        )
         
-        # Envia a mensagem para a sessão de chat ativa
-        response = current_chat.send_message(content_for_turn)
+        full_response_text = response['message']['content']
+        data = parse_json_response(full_response_text)
 
-        # Verifica se a resposta foi bloqueada ou está vazia
-        if not response.parts:
-            error_message = "Resposta da IA bloqueada ou vazia."
-            if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
-                error_message += f" Causa: {response.prompt_feedback.block_reason if hasattr(response.prompt_feedback, 'block_reason') else 'Não especificada'}."
-            return error_message, None, False
-
-        natural_response_text = response.text
-        extracted_command = None
-        continue_route = False
-
-        # Extração do comando
-        response_lines = natural_response_text.split('\n')
-        for line in response_lines:
-            if line.startswith('[DECISÃO]'):
-                command_text = line.replace('[DECISÃO]', '').strip()
-                if command_text.lower() == 'nenhum comando necessário' or not command_text:
-                    extracted_command = None
-                else:
-                    extracted_command = command_text
-                continue
-            
-            elif line.startswith('[CONTINUA]'):
-                continue_route = True
-        
-        return natural_response_text, extracted_command, continue_route
+        chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}"
+        return chat_display_text, data['comando'], False
 
     except Exception as e:
         error_details = traceback.format_exc()
-        print(f"DEBUG: Erro em run_ai: {str(e)}\n{error_details}")
-        return f"Erro crítico ao processar com IA: {str(e)}", None, False
+        print(f"DEBUG: Erro em run_ai_local: {str(e)}\n{error_details}")
+        return f"Erro Local: {str(e)}", None, False
+
+def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=7) -> tuple[str, str | None, bool]:
+    """
+    Executa a IA para gerar comandos de controle do drone via Gemini.
+    Args:
+        text (str | None): Descrição do que o drone deve fazer.
+        frame (Image.Image): Frame da câmera do drone.
+        step (int): Passo atual na sequência de comandos.
+        height (int): Altura atual do drone em cm.
+        max_steps (int): Número máximo de passos permitidos.
+    Returns:
+        tuple: (resposta natural, comando técnico, continuar rota)
+    """
+    try:
+        current_chat = get_chat_session()
+        user_text = text if text else 'Analise a cena.'
+        formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
+
+        system_prompt = get_ai_instruction(user_text, formatted_log, height, step, max_steps)
+        frame_grid = add_grid_to_image(frame)
+
+        response = current_chat.send_message([system_prompt, frame_grid])
+
+        if not response.parts:
+            print("\n--- DEBUG GEMINI BLOQUEADO ---")
+            if hasattr(response, 'prompt_feedback'):
+                print(f"Prompt Feedback: {response.prompt_feedback}")
+            if hasattr(response, 'candidates') and response.candidates:
+                print(f"Finish Reason: {response.candidates[0].finish_reason}")
+                print(f"Safety Ratings: {response.candidates[0].safety_ratings}")
+            print("------------------------------\n")
+            return "Erro: Bloqueio de Segurança Rígido.", None, False
+        
+        # Processa o JSON
+        data = parse_json_response(response.text)
+        
+        # Retorna formatado como a interface espera: (Texto para o chat, Comando Técnico, Bool Continua)
+        chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}\nContinuar: {data['continua']}"
+        return chat_display_text, data['comando'], data['continua']
+
+    except Exception as e:
+        return f"Erro crítico: {str(e)}", None, False
     
+def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool]:
+    global openai_history
+    if not client_openai: return "Erro OpenAI Client.", None, False
+
+    try:
+        if step == 0:
+            reset_openai_history()
+        if not text:
+            text = "Analise a cena."
+        prompt = get_step_prompt(text, last_action, height, step, max_steps)
+
+        frame_grid = add_grid_to_image(frame)
+        base64_img = pil_image_to_base64(frame_grid)
+
+        current_user_msg: ChatCompletionMessageParam = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{base64_img}",
+                        "detail": "low"
+                    }
+                }
+            ]
+        }
+        openai_history.append(current_user_msg)
+
+        response = client_openai.chat.completions.create(
+            model=OPENAI_MODEL_NAME,
+            messages=openai_history,
+            response_format={ "type": "json_object" },
+            max_tokens=300,
+            temperature=0.7,
+        )
+
+        full_text = response.choices[0].message.content
+        if not full_text:
+            return "Erro OpenAI: Resposta vazia.", None, False
+        data = parse_json_response(full_text)
+
+        openai_history.append({"role": "assistant", "content": full_text})
+        
+        last_user_index = len(openai_history) - 2
+        if openai_history[last_user_index]['role'] == 'user':
+            openai_history[last_user_index]['content'] = f"[Passo {step}] Prompt: {prompt} | Imagem processada."
+
+        chat_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}\nContinuar: {data['continua']}"
+        return chat_text, data['comando'], data['continua']
+
+    except Exception as e:
+        print(f"Erro OpenAI: {e}")
+        return f"Erro OpenAI: {str(e)}", None, False
+
+def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool | None]:
+    """
+    Função Mestra que decide qual IA usar.
+    Args:
+        text (str | None): Descrição do que o drone deve fazer.
+        frame (Image.Image): Frame da câmera do drone.
+        step (int): Passo atual na sequência de comandos.
+        height (int): Altura atual do drone em cm.
+        last_action (str): Último comando executado pelo drone.
+    Returns:
+        tuple: (resposta natural, comando técnico, continuar rota)
+    """
+    if AI_PROVIDER == 'LOCAL':
+        return run_ai_local(text, frame)
+    elif AI_PROVIDER == 'OPENAI':
+        return run_ai_openai(text, frame, step, height, last_action, max_steps)
+    else:
+        return run_ai_gemini(text, frame, step, height, max_steps)
+
 def validate_command(cmd: str) -> bool:
     """
     Valida o comando recebido.
@@ -148,33 +555,17 @@ def validate_command(cmd: str) -> bool:
     Returns:
         bool: True se o comando for válido, False caso contrário.
     """
-    if not cmd: # Trata comando None ou vazio
-        return False
-        
-    parts = cmd.strip().split() # Divide o comando
-    if not parts:
-        return False
-
-    base_cmd = parts[0].lower()
-
-    if base_cmd not in COMMAND_LIST:
+    if not cmd: return False
+    
+    parts = cmd.lower().split()
+    if not parts or parts[0] not in COMMAND_LIST:
         return False
 
-    # Comandos que requerem um argumento numérico
-    if base_cmd in ['up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw']:
-        if len(parts) != 2:
-            return False
-        try:
-            val = int(parts[1])
-            if base_cmd in ['cw', 'ccw']: # Rotação em graus
-                if not (1 <= val <= 360): return False
-            else: # Movimento em cm
-                if not (10 <= val <= 500): return False
-        except ValueError:
-            return False # Não é um número inteiro
-    # Comandos que não requerem argumento numérico
-    elif base_cmd in ['land', 'takeoff']:
-        if len(parts) != 1:
-            return False
+    base_cmd = parts[0]
 
-    return True
+    # Comandos de Sistema (sem argumento)
+    if base_cmd in ['takeoff', 'land']:
+        return len(parts) == 1
+
+    # Comandos de Movimento/Rotação (precisam de 1 argumento numérico)
+    return len(parts) == 2 and parts[1].isdigit()
