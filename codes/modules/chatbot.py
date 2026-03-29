@@ -1,5 +1,5 @@
-import google.generativeai as genai
-from google.generativeai.types import GenerationConfig
+from google import genai
+from google.genai import types
 from PIL import Image, ImageDraw
 import traceback
 import ollama
@@ -17,9 +17,10 @@ AI_PROVIDER = 'GEMINI'
 #AI_PROVIDER = 'LOCAL'
 #AI_PROVIDER = 'OPENAI'
 LOCAL_MODEL_NAME = 'minicpm-v:8b'
-GEMINI_MODEL_NAME = 'gemini-2.5-flash'
+GEMINI_MODEL_NAME = 'gemini-3.0-flash'
 OPENAI_MODEL_NAME = 'gpt-4o-mini'
 OPENAI_API_KEY = utils.get_openai_key()
+GEMINI_API_KEY = utils.get_gemini_key()
 ACCEPTED_ROTATIONS = [10, 15, 30, 45, 90, 135, 180, 360]
 COMMAND_LIST = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
@@ -40,19 +41,15 @@ SAÍDA OBRIGATÓRIA EM JSON:
 """
 openai_history: list[ChatCompletionMessageParam] = []
 
-utils.configure_generative_ai()
-config = GenerationConfig(
+client_gemini = genai.Client(api_key=GEMINI_API_KEY)
+
+# A configuração agora usa types.GenerateContentConfig
+config = types.GenerateContentConfig(
     temperature=0.7,
     top_p=0.95,
     top_k=40,
-    max_output_tokens=2048, # Limita o tamanho da resposta para não gastar tempo/tokens
+    max_output_tokens=2048,
     response_mime_type="application/json"
-)
-
-# Passa a config na inicialização do modelo
-model_gemini = genai.GenerativeModel( # type: ignore
-    model_name=GEMINI_MODEL_NAME,
-    generation_config=config,
 )
 
 client_openai = None
@@ -77,7 +74,10 @@ def get_chat_session():
     """
     global chat_session_gemini
     if chat_session_gemini is None:
-        chat_session_gemini = model_gemini.start_chat(history=[])
+        chat_session_gemini = client_gemini.chats.create(
+            model=GEMINI_MODEL_NAME,
+            config=config
+        )
         print('Sessão de chat iniciada.')
     return chat_session_gemini
 
@@ -444,33 +444,30 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         tuple: (resposta natural, comando técnico, continuar rota)
     """
     try:
-        current_chat = get_chat_session()
         user_text = text if text else 'Analise a cena.'
         formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
 
         system_prompt = get_ai_instruction(user_text, formatted_log, height, step, max_steps)
         frame_grid = add_grid_to_image(frame)
 
-        response = current_chat.send_message([system_prompt, frame_grid])
+        # MUDANÇA AQUI: Chamada stateless (direta) em vez de chat_session
+        response = client_gemini.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[system_prompt, frame_grid],
+            config=config
+        )
 
-        if not response.parts:
-            print("\n--- DEBUG GEMINI BLOQUEADO ---")
-            if hasattr(response, 'prompt_feedback'):
-                print(f"Prompt Feedback: {response.prompt_feedback}")
-            if hasattr(response, 'candidates') and response.candidates:
-                print(f"Finish Reason: {response.candidates[0].finish_reason}")
-                print(f"Safety Ratings: {response.candidates[0].safety_ratings}")
-            print("------------------------------\n")
+        if not response.candidates or not response.candidates[0].content:
             return "Erro: Bloqueio de Segurança Rígido.", None, False
         
-        # Processa o JSON
-        data = parse_json_response(response.text)
+        data = parse_json_response(response.text) # type: ignore
         
-        # Retorna formatado como a interface espera: (Texto para o chat, Comando Técnico, Bool Continua)
         chat_display_text = f"Análise: {data['analise']}\nPlano: {data['plano']}\nComando: {data['comando']}\nContinuar: {data['continua']}"
         return chat_display_text, data['comando'], data['continua']
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return f"Erro crítico: {str(e)}", None, False
     
 def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool]:

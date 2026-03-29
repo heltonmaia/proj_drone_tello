@@ -32,24 +32,24 @@ class TelloGUI:
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure('TFrame', background=BG_COLOR)
-        style.configure('TLabel', background=BG_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 12))
-        style.configure('Bold.TLabel', background=BG_COLOR, foreground='white', font=('Ubuntu', 12, 'bold')) # Um estilo customizado para negrito
+        style.configure('TLabel', background=BG_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 16))
+        style.configure('Bold.TLabel', background=BG_COLOR, foreground='white', font=('Ubuntu', 16, 'bold')) # Um estilo customizado para negrito
         style.configure('TButton', background='#555555', foreground='white', borderwidth=1, focusthickness=3, focuscolor='none')
         style.map('TButton', background=[('active', "#939393")]) # Cor quando o mouse está sobre
         style.configure('TLabelframe', background=LBF_COLOR, bordercolor=TEXT_COLOR)
-        style.configure('TLabelframe.Label', background=LBF_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 12))
+        style.configure('TLabelframe.Label', background=LBF_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 16))
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        connected = self.tello.start_tello()
+        # connected = self.tello.start_tello()
 
-        if not connected:
-            messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
-            self.root.destroy()
-            return
+        # if not connected:
+        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+        #     self.root.destroy()
+        #     return
 
         self.command_log = tello_control.log_messages
-        # self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
@@ -111,7 +111,7 @@ class TelloGUI:
         container.rowconfigure(1, weight=1)
         container.rowconfigure(2, weight=0)
         # Display da resposta
-        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 12), wraplength=800, justify="left")
+        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 16), wraplength=800, justify="left")
         self.response_label_user.grid(row=0, column=0, sticky="sew", pady=(0, 5))
         self.ai_response_frame = ttk.Frame(container)
         self.ai_response_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
@@ -122,7 +122,7 @@ class TelloGUI:
             wrap="word",
             height=8,
             state="disabled", # Começa como somente leitura
-            font=("Ubuntu", 12),
+            font=("Ubuntu", 16),
             bg=LBF_COLOR,
             fg=TEXT_COLOR,
             borderwidth=0,
@@ -138,7 +138,7 @@ class TelloGUI:
         input_frame = ttk.Frame(container)
         input_frame.grid(row=2, column=0, sticky="ew", pady=5)
         input_frame.columnconfigure(0, weight=1)
-        ttk.Label(input_frame, text="Envie um comando para o drone:").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(input_frame, text="Envie um comando para o drone:", font=("Ubuntu", 16)).grid(row=0, column=0, columnspan=2, sticky="w")
         self.text_input_entry = ttk.Entry(input_frame)
         self.text_input_entry.grid(row=1, column=0, sticky="ew")
         self.send_text_button = ttk.Button(input_frame, text="Enviar", command=self.send_ai_command)
@@ -238,7 +238,7 @@ class TelloGUI:
             except Exception as e:
                 print(f"ERRO AO CARREGAR IMAGEM: '{icon_path}'. Detalhes: {e}")
 
-            value_label = ttk.Label(row_frame, text=f"N/A {unit}", font=("Ubuntu", 11, "bold"))
+            value_label = ttk.Label(row_frame, text=f"N/A {unit}", font=("Ubuntu", 14, "bold"))
             value_label.pack(side="left")
             self.param_labels[key] = (value_label, unit)
 
@@ -275,6 +275,7 @@ class TelloGUI:
         self.command_log.clear()
         tello_control.log_messages.clear()
         self.log_listbox.delete(0, tk.END)
+        self.tello.clear_command_queue()
         self.show_message("Log", "Log de comandos limpo.")
 
     def send_ai_command(self) -> None:
@@ -305,10 +306,10 @@ class TelloGUI:
                     frame = self.tello.frame.copy()
                     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     return Image.fromarray(img_rgb)
-            # ret, frame = self.webcam.read()
-            # if ret:
-            #     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            #     return Image.fromarray(img_rgb)
+            ret, frame = self.webcam.read()
+            if ret:
+                img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                return Image.fromarray(img_rgb)
         except Exception:
             pass
     
@@ -427,8 +428,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        frame = self.tello.get_frame()
-        # frame = self.webcam.read()[1] # Ativar webcam
+        # frame = self.tello.get_frame()
+        frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
@@ -446,7 +447,7 @@ class TelloGUI:
         self.fps_counter += 1
 
         # Agenda a próxima atualização
-        self.root.after(20, self.update_video_frame)
+        self.root.after(33, self.update_video_frame)
         
     def update_stats(self) -> None:
         """Atualiza os valores dos parâmetros do drone."""
@@ -574,11 +575,12 @@ class TelloGUI:
         self.stop_record_button.config(state="disabled")
 
     def emergency_stop(self) -> None:
-        """Função para parar imediatamente o drone."""
-        # self.tello.send_cmd('stop')
+        """Função para parar imediatamente o drone e abortar a IA."""
         if self.abort_sequence_event:
             self.abort_sequence_event.set()
-            print("Comando de emergência enviado ao drone.")
+        
+        self.tello.emergency_stop()
+        self.update_log("Parada de emergência")
 
     def _exit(self) -> None:
         """Função chamada ao fechar a janela."""
