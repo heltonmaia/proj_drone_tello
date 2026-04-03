@@ -41,12 +41,12 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
-        # connected = self.tello.start_tello()
+        connected = self.tello.start_tello()
 
-        # if not connected:
-        #     messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
-        #     self.root.destroy()
-        #     return
+        if not connected:
+            messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
+            self.root.destroy()
+            return
 
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
@@ -428,8 +428,8 @@ class TelloGUI:
 
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
-        # frame = self.tello.get_frame()
-        frame = self.webcam.read()[1] # Ativar webcam
+        frame = self.tello.get_frame()
+        # frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         # Garante que temos um array válido antes de prosseguir.
