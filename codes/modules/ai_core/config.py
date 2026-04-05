@@ -1,10 +1,24 @@
+"""
+Módulo de Configurações e Constantes para o Núcleo de IA.
+
+Este módulo centraliza as configurações, chaves de API, nomes de modelos 
+e outras constantes relacionadas à inteligência artificial utilizada no projeto.
+Ele é importado por outros módulos para garantir consistência e facilitar 
+a manutenção.
+
+Principais Funcionalidades:
+    - Definição do provedor de IA (Gemini, OpenAI, Local).
+    - Armazenamento de chaves de API e nomes de modelos.
+    - Função utilitária para obter o nome do modelo atualmente em uso.
+"""
+
 from modules import utils
 
 AI_PROVIDER = 'GEMINI'
 #AI_PROVIDER = 'LOCAL'
 # AI_PROVIDER = 'OPENAI'
 
-LOCAL_MODEL_NAME = 'minicpm-v:8b'
+LOCAL_MODEL_NAME = 'llama3'
 GEMINI_MODEL_NAME = 'gemini-2.5-flash'
 OPENAI_MODEL_NAME = 'gpt-4o-mini'
 

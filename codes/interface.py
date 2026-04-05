@@ -1,3 +1,19 @@
+"""
+Módulo de Interface Gráfica para Controle do Drone.
+
+Este módulo é responsável por criar a interface gráfica usando Tkinter,integrar 
+a transmissão de vídeo da webcam e do drone, exibir os parâmetros do drone, e 
+fornecer uma área de chat para interação com a LLM. Ele também gerencia os 
+logs de comandos e a execução de sequências de controle geradas pela IA.
+
+Principais Funcionalidades:
+    - Transmissão de vídeo da webcam e do drone.
+    - Exibição de parâmetros do drone.
+    - Área de chat para interação com a LLM.
+    - Gerenciamento de logs de comandos e execução de sequências.
+    - Botões de controle manual (decolagem, pouso, emergência).
+"""
+
 import tkinter as tk
 from tkinter import ttk, messagebox
 import threading
@@ -57,7 +73,7 @@ class TelloGUI:
         self.last_time_fps = time.time()
         self.fps = 0 # FPS calculado
         self.is_sequence_running = False
-        self.max_steps = "7"
+        self.max_steps = "4"
         self.drone_height = 0 # cm
         self.abort_sequence_event = threading.Event()
 

@@ -1,3 +1,17 @@
+"""
+Módulo central do chatbot de controle do drone.
+
+Este módulo é responsável por integrar a visão computacional, os prompts de IA,
+e o parser de comandos para criar uma interface de controle inteligente para o 
+drone. Ele formata os prompts, processa as respostas e extrai os comandos de 
+voo. Ele é o "cérebro" que conecta a percepção visual à ação do drone, 
+garantindo que as decisões sejam tomadas de forma inteligente e contextualizada.
+
+Principais Funcionalidades:
+    - Integração de visão computacional para análise de cena.
+    - Chamadas unificadas para diferentes provedores de IA.
+"""
+
 import traceback
 import ollama
 from google import genai
@@ -62,29 +76,46 @@ def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None,
         tuple: (resposta formatada, comando técnico, continuar rota)
     """
     try:
-        user_objective = text if text else 'Navegue pelo ambiente com segurança.'
-        cenario_texto = vision.extract_features_with_yolo(frame)
+        user_objective = text if text else 'Descreva a cena.'
+        scene_text = vision.extract_features_with_yolo(frame)
 
-        system_rules = f"""Você é o CÉREBRO de um DRONE TELLO. Sua missão é ler o relatório visual e gerar o comando.
-REGRAS: Comandos válidos: {config.COMMAND_LIST}. Se o centro estiver bloqueado, GIRE ou suba. Caminho livre = forward 50.
-SAÍDA OBRIGATÓRIA JSON: {{"analise": "texto", "plano": "texto", "comando": "comando valor", "continua": false}}"""
+        formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
+
+        base_instruction = prompts.get_ai_instruction(user_objective, formatted_log, height=0, step=0, max_steps=4)
+
+        # Regras adicionais específicas para o interpretador de radar
+        radar_instruction = """
+        ATENÇÃO PARA O RADAR:
+        - Se o caminho frontal estiver bloqueado, GIRE ('cw 90') ou SUBA ('up 50'). NUNCA vá 'forward'.
+        - Se o radar acusar CEGUEIRA (parede lisa), AFASTE-SE imediatamente ('back 50').
+        """
 
         response = ollama.chat(
             model=config.LOCAL_MODEL_NAME,
             messages=[
-                {'role': 'system', 'content': system_rules},
-                {'role': 'user', 'content': f"OBJETIVO: {user_objective}\n{cenario_texto}\nGere o JSON."}
+                {'role': 'system', 'content': base_instruction + radar_instruction},
+                {'role': 'user', 'content': f"OBJETIVO: {user_objective}\n \
+                DESCRIÇÃO DA CENA:{scene_text}\n \
+                Gere o JSON."}
             ],
             options={'temperature': 0.1, 'num_predict': 150}
         )
         
         data = parser.parse_json_response(response['message']['content'])
-        return f"Radar: {cenario_texto}\nAnálise: {data['analise']}\nComando: {data['comando']}", data['comando'], False
+        chat_display_text = (
+            f"Radar: {scene_text}\n\n"
+            f"Análise: {data.get('analise', 'N/A')}\n"
+            f"Plano: {data.get('plano', 'Sem plano.')}\n"
+            f"Comando: {data.get('comando', 'none')}"
+        )
+
+        return chat_display_text, data.get('comando', None), data.get('continua', False)
+    
     except Exception as e:
         print(f"Erro em run_ai_local: {traceback.format_exc()}")
         return f"Erro Local: {str(e)}", None, False
 
-def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=7) -> tuple[str, str | None, bool]:
+def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=4) -> tuple[str, str | None, bool]:
     """
     Executa a IA para gerar comandos de controle do drone via Gemini.
     Args:
@@ -128,7 +159,7 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         traceback.print_exc()
         return f"Erro crítico: {str(e)}", None, False
     
-def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool]:
+def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=4) -> tuple[str, str | None, bool]:
     global openai_history
     if not client_openai: return "Erro OpenAI Client.", None, False
 
@@ -183,7 +214,7 @@ def run_ai_openai(text: str | None, frame: Image.Image, step: int=0, height: int
         print(f"Erro OpenAI: {e}")
         return f"Erro OpenAI: {str(e)}", None, False
 
-def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=7) -> tuple[str, str | None, bool | None]:
+def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str="Nenhuma", max_steps: int=4) -> tuple[str, str | None, bool | None]:
     """
     Função Mestra que decide qual IA usar.
     Args:

@@ -1,3 +1,18 @@
+"""
+Módulo de Processamento Visual e Extração de Features.
+
+Este módulo é responsável por atuar como os "olhos" do drone Tello. 
+Ele utiliza visão computacional clássica (OpenCV) e modelos de aprendizado 
+profundo (YOLOv8) para analisar os frames da câmera, detectar obstáculos, 
+e converter o mundo visual em relatórios textuais compreensíveis para as LLMs.
+
+Funcionalidades Principais:
+    - Carregamento sob demanda (Lazy Loading) do modelo YOLOv8.
+    - Detecção de objetos e mapeamento espacial (esquerda, centro, direita).
+    - Detecção de proximidade crítica via variância de pixels.
+    - Conversão e formatação de imagens PIL para APIs de IA.
+"""
+
 import io
 import base64
 import cv2
@@ -23,6 +38,16 @@ def extract_features_with_yolo(frame: Image.Image) -> str:
     # Converte de PIL para o formato do OpenCV/YOLO
     yolo = get_yolo_model()
     img_cv = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+
+    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+    variancia = np.var(gray) # Calcula a quantidade de detalhes na imagem
+    
+    # Se a variância for muito baixa
+    if variancia < 100:
+        return "ALERTA CRÍTICO DE COLISÃO: A câmera está cega, provavelmente a \
+centímetros de uma parede lisa ou obstáculo. O caminho frontal ESTÁ BLOQUEADO. \
+Ação obrigatória: cw 90 ou back 20."
+
     height, width, _ = img_cv.shape
     
     # Roda a inferência (verbose=False para não sujar o terminal)
@@ -30,7 +55,7 @@ def extract_features_with_yolo(frame: Image.Image) -> str:
     
     detecoes = []
     
-    # O YOLO retorna caixas delimitadoras (bounding boxes)
+    # Bounding boxes
     for box in results[0].boxes:
         classe = int(box.cls[0])
         nome_obj = yolo.names[classe]

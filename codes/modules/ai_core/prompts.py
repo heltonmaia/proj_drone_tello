@@ -1,3 +1,18 @@
+"""
+Módulo de Prompts e Instruções para LLMs.
+
+Este módulo é responsável por gerar os prompts e instruções que serão enviados 
+para as LLMs (Gemini, OpenAI, Local) para que elas possam analisar a cena, 
+entender o contexto e gerar os comandos de controle do drone Tello. Ele inclui 
+funções para criar prompts iniciais, prompts de continuação e também para 
+formatar o histórico de comandos e status do drone.
+
+Principais Funcionalidades:
+    - Geração de prompts iniciais para a missão.
+    - Geração de prompts de continuação para passos subsequentes.
+    - Formatação de logs e status para inclusão nos prompts.
+"""
+
 from modules.ai_core.config import COMMAND_LIST
 
 SYSTEM_INSTRUCTION_TEXT = f"""

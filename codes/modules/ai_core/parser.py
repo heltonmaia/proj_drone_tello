@@ -1,5 +1,17 @@
+"""
+Módulo de Parser e Validação de Comandos.
+
+Este módulo é responsável por interpretar as respostas textuais das LLMs 
+(Gemini, OpenAI, Local) e extrair os comandos de controle do drone Tello. 
+Ele também inclui uma função de validação para garantir que os comandos estejam 
+dentro dos parâmetros aceitáveis antes de serem enviados para o drone.
+
+Principais Funcionalidades:
+    - Parsing unificado de respostas JSON.
+    - Ajuste de comandos para os formatos esperados pelo SDK do Tello.
+"""
+
 import json
-import re
 
 from modules.ai_core.config import ACCEPTED_ROTATIONS, COMMAND_LIST
 
@@ -100,17 +112,19 @@ def parse_json_response(text_response: str) -> dict:
         print(f"ERRO JSON: {e}")
         print(f"Texto recebido (Raw): {text_response}")
         
-        # Retorno de segurança para não travar a UI
         return {
             "analise": "Erro na comunicação (JSON Inválido). Tentando estabilizar.",
+            "plano": "Nenhum plano devido ao erro.",
             "comando": "none",
             "continua": False
         }
     except Exception as e:
         print(f"Erro genérico no parse: {e}")
+
         return {
             "analise": f"Erro: {str(e)}",
-            "comando": None,
+            "plano": "Nenhum plano devido ao erro.",
+            "comando": "none",
             "continua": False
         }
     

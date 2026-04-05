@@ -1,3 +1,13 @@
+"""
+Módulo de Controle do Drone Tello.
+
+Este módulo é responsável por processar os comandos gerados pela IA e enviá-los 
+para o drone Tello. Ele inclui uma função de processamento de comandos que 
+valida os comandos recebidos e os encaminha para o drone, garantindo que apenas 
+comandos válidos sejam executados. Ele também mantém um log dos comandos 
+enviados para facilitar o monitoramento e depuração.
+"""
+
 VALID_COMMANDS = [
     'takeoff', 'land', 'up', 'down', 'left', 'right', 'forward', 'back', 'cw', 'ccw'
 ]
