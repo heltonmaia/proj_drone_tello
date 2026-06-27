@@ -30,44 +30,53 @@ def get_yolo_model():
         _yolo_model = YOLO('yolov8n.pt')
     return _yolo_model
 
-def extract_features_with_yolo(frame: Image.Image) -> str:
+def extract_features_with_yolo(frame: Image.Image, draw_boxes: bool = True) -> tuple[str, Image.Image]:
     """
     Roda o YOLO no frame e traduz a posição dos objetos para texto.
-    Divide a tela em Esquerda, Centro e Direita para noção espacial.
+    Agora retorna também a imagem anotada com bounding boxes.
+
+    Args:
+        frame (Image.Image): Imagem atual capturada pela câmera
+        draw_boxes (bool): Se True, a função anota as bounding boxes
+
+    Returns:
+        tuple: (descrição textual, imagem PIL anotada)
     """
-    # Converte de PIL para o formato do OpenCV/YOLO
     yolo = get_yolo_model()
     img_cv = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
 
     gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-    variancia = np.var(gray) # Calcula a quantidade de detalhes na imagem
+    variancia = np.var(gray)
     
-    # Se a variância for muito baixa
+    # Cópia para desenhar as boxes
+    annotated_cv = img_cv.copy() if draw_boxes else img_cv
+    
     if variancia < 100:
-        return "ALERTA CRÍTICO DE COLISÃO: A câmera está cega, provavelmente a \
-centímetros de uma parede lisa ou obstáculo. O caminho frontal ESTÁ BLOQUEADO. \
-Ação obrigatória: cw 90 ou back 20."
+        # Desenha aviso vermelho na imagem mesmo no caso de cegueira
+        if draw_boxes:
+            cv2.putText(annotated_cv, "CEGUEIRA / COLISAO IMINENTE", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        annotated_pil = Image.fromarray(cv2.cvtColor(annotated_cv, cv2.COLOR_BGR2RGB))
+        return ("ALERTA CRÍTICO DE COLISÃO: A câmera está cega, provavelmente a "
+                "centímetros de uma parede lisa ou obstáculo. O caminho frontal "
+                "ESTÁ BLOQUEADO. Ação obrigatória: cw 90 ou back 20."), annotated_pil
 
     height, width, _ = img_cv.shape
-    
-    # Roda a inferência (verbose=False para não sujar o terminal)
     results = yolo(img_cv, verbose=False)
     
     detecoes = []
+    colors = {}  # Cor consistente por classe
     
-    # Bounding boxes
     for box in results[0].boxes:
         classe = int(box.cls[0])
         nome_obj = yolo.names[classe]
         
-        # Pega as coordenadas X e Y do centro do objeto
         x_center, y_center, w, h = box.xywh[0]
+        x_center, y_center, w, h = float(x_center), float(y_center), float(w), float(h)
         
-        # Calcula área para saber se o objeto está "perto" (grande na tela)
         area_pct = (w * h) / (width * height)
         distancia = "próximo/grande" if area_pct > 0.15 else "longe/pequeno"
         
-        # Determina a posição horizontal
         if x_center < width / 3:
             posicao = "à esquerda"
         elif x_center > 2 * width / 3:
@@ -76,11 +85,31 @@ Ação obrigatória: cw 90 ou back 20."
             posicao = "no centro (caminho frontal bloqueado)"
             
         detecoes.append(f"- 1 {nome_obj} ({posicao}, {distancia})")
+        
+        if draw_boxes:
+            # Cor por classe (hash simples)
+            if nome_obj not in colors:
+                np.random.seed(hash(nome_obj) % 2**32)
+                colors[nome_obj] = tuple(int(c) for c in np.random.randint(0, 255, 3))
+            color = colors[nome_obj]
+            
+            x1 = int(x_center - w/2)
+            y1 = int(y_center - h/2)
+            x2 = int(x_center + w/2)
+            y2 = int(y_center + h/2)
+            
+            cv2.rectangle(annotated_cv, (x1, y1), (x2, y2), color, 2)
+            label = f"{nome_obj} {posicao}"
+            cv2.putText(annotated_cv, label, (x1, max(y1-5, 15)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    # Converte de volta para PIL RGB
+    annotated_pil = Image.fromarray(cv2.cvtColor(annotated_cv, cv2.COLOR_BGR2RGB))
     
     if not detecoes:
-        return "CENÁRIO: O caminho está completamente livre de obstáculos visíveis."
+        return "CENÁRIO: O caminho está completamente livre de obstáculos visíveis.", annotated_pil
     
-    return "CENÁRIO DETECTADO PELO SENSOR VISUAL:\n" + "\n".join(detecoes)
+    return "CENÁRIO DETECTADO PELO SENSOR VISUAL:\n" + "\n".join(detecoes), annotated_pil
 
 def add_grid_to_image(image: Image.Image) -> Image.Image:
     """

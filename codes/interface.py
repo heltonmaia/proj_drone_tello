@@ -44,7 +44,7 @@ class TelloGUI:
 
         # Configurações de estilo
         self.root.configure(bg=BG_COLOR)
-        self.root.geometry("1300x1000")
+        self.root.geometry("1300x1200")
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure('TFrame', background=BG_COLOR)
@@ -57,12 +57,15 @@ class TelloGUI:
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
+        
+        # Comentar este bloco para testar com webcam
         connected = self.tello.start_tello()
 
         if not connected:
             messagebox.showerror("Erro de Conexão", "Não foi possível conectar ao drone Tello.")
             self.root.destroy()
             return
+        ####
 
         self.command_log = tello_control.log_messages
         self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
@@ -126,19 +129,31 @@ class TelloGUI:
         container.rowconfigure(0, weight=0)
         container.rowconfigure(1, weight=1)
         container.rowconfigure(2, weight=0)
-        # Display da resposta
-        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 16), wraplength=800, justify="left")
+        
+        # Display da resposta do usuário
+        self.response_label_user = ttk.Label(
+            container, text="", font=("Ubuntu", 16), wraplength=800, justify="left"
+        )
         self.response_label_user.grid(row=0, column=0, sticky="sew", pady=(0, 5))
-        self.ai_response_frame = ttk.Frame(container)
-        self.ai_response_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
+        
+        # Frame que contém o chat text (esquerda) + preview YOLO (direita)
+        ai_response_container = ttk.Frame(container)
+        ai_response_container.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
+        ai_response_container.rowconfigure(0, weight=1)
+        ai_response_container.columnconfigure(0, weight=3)
+        ai_response_container.columnconfigure(1, weight=1)
+        
+        self.ai_response_frame = ttk.Frame(ai_response_container)
+        self.ai_response_frame.grid(row=0, column=0, sticky="nsew")
         self.ai_response_frame.rowconfigure(0, weight=1)
         self.ai_response_frame.columnconfigure(0, weight=1)
+        
         self.response_text_ai = tk.Text(
             self.ai_response_frame,
             wrap="word",
             height=8,
-            state="disabled", # Começa como somente leitura
-            font=("Ubuntu", 16),
+            state="disabled",
+            font=("Ubuntu", 14),
             bg=LBF_COLOR,
             fg=TEXT_COLOR,
             borderwidth=0,
@@ -149,19 +164,38 @@ class TelloGUI:
         scrollbar = ttk.Scrollbar(self.ai_response_frame, command=self.response_text_ai.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.response_text_ai.config(yscrollcommand=scrollbar.set)
-
-        # Texto
+        
+        # --- NOVO: Painel de preview da visão da IA ---
+        vision_frame = ttk.LabelFrame(ai_response_container, text="Visão da IA (YOLO)")
+        vision_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
+        vision_frame.rowconfigure(0, weight=1)
+        vision_frame.columnconfigure(0, weight=1)
+        
+        self.vision_preview_label = tk.Label(vision_frame, bg="black", anchor="center")
+        self.vision_preview_label.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        
+        # Placeholder inicial
+        placeholder = Image.new("RGB", (240, 180), color="black")
+        self._vision_photo = ImageTk.PhotoImage(placeholder)
+        self.vision_preview_label.config(image=self._vision_photo)
+        
+        # Inicia loop de atualização do preview
+        if chatbot.AI_PROVIDER == "LOCAL":
+            self.update_vision_preview()
+        
+        # Input
         input_frame = ttk.Frame(container)
         input_frame.grid(row=2, column=0, sticky="ew", pady=5)
         input_frame.columnconfigure(0, weight=1)
-        ttk.Label(input_frame, text="Envie um comando para o drone:", font=("Ubuntu", 16)).grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(input_frame, text="Envie um comando para o drone:", font=("Ubuntu", 16)).grid(
+            row=0, column=0, columnspan=2, sticky="w"
+        )
         self.text_input_entry = ttk.Entry(input_frame)
         self.text_input_entry.grid(row=1, column=0, sticky="ew")
         self.send_text_button = ttk.Button(input_frame, text="Enviar", command=self.send_ai_command)
-        self.send_text_button.grid(row=1, column=1, padx=(5,0))
-        self.root.bind('<Return>', lambda event: self.send_ai_command()) # Enviar com Enter
+        self.send_text_button.grid(row=1, column=1, padx=(5, 0))
+        self.root.bind("<Return>", lambda event: self.send_ai_command())
 
-        # Áudio
         self.start_record_button = ttk.Button(input_frame, text="Iniciar Gravação", command=self.start_recording)
         self.start_record_button.grid(row=2, column=0, sticky="s", pady=(10, 0), padx=(0, 5))
         self.stop_record_button = ttk.Button(input_frame, text="Parar Gravação", command=self.stop_recording, state="disabled")
@@ -367,18 +401,16 @@ class TelloGUI:
         self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True)
 
-        MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
+        MAX_STEPS = int(self.max_steps)
         current_frame = self._get_frame()
-        
         last_action = "Nenhuma."
+        recent_actions = []
 
         try:
             for step in range(MAX_STEPS):
                 current_frame = self._get_frame()
-                
                 prompt_text = user_text
 
-                # Chamada atualizada passando last_action
                 response, command, continue_route = chatbot.run_ai(
                     text=prompt_text,
                     frame=current_frame,
@@ -388,32 +420,34 @@ class TelloGUI:
                     max_steps=MAX_STEPS
                 )
 
-                # Atualiza UI
-                display_text = user_text if step == 0 else f"Sequência de comandos, passo {step + 1}/{MAX_STEPS}"
+                display_text = user_text if step == 0 else f"Sequência passo {step + 1}/{MAX_STEPS}"
                 self.root.after(0, self.update_chat_display, display_text, response)
 
                 if command and chatbot.validate_command(command):
+                    recent_actions.append(command)
+                    if len(recent_actions) >= 3 and len(set(recent_actions[-3:])) == 1:
+                        print(f"Loop detectado: '{command}' repetido 3x. Abortando.")
+                        self.root.after(0, self.update_log, f"LOOP: {command} x3 (abortado)")
+                        break
+                    
                     last_action = command
                     tello_control.process_ai_command(self.tello, command)
-                    self.root.after(0, self.update_log, f'{step + 1}: {command}')
+                    self.root.after(0, self.update_log, f"{step + 1}: {command}")
                     
                     wait_time = self._calculate_wait_time(command)
-                    
-                    was_interrupted = self.abort_sequence_event.wait(wait_time)
-                    if was_interrupted:
-                        print("Sequência abortada durante espera.")
+                    if self.abort_sequence_event.wait(wait_time):
                         break
                 else:
                     last_action = "Nenhum comando."
-                    print(f"Sem comando válido no passo {step}.")
-                    if not continue_route: break
+                    if not continue_route:
+                        break
 
                 if not continue_route:
                     break
                 
-                # Se não houve comando (apenas análise), espera um pouco menos antes do próximo loop
                 if not command:
-                    if self.abort_sequence_event.wait(2): break
+                    if self.abort_sequence_event.wait(2):
+                        break
 
         except Exception as e:
             print(f"Erro seq: {e}")
@@ -464,7 +498,20 @@ class TelloGUI:
 
         # Agenda a próxima atualização
         self.root.after(33, self.update_video_frame)
+
+    def update_vision_preview(self) -> None:
+        """Atualiza o preview da última imagem anotada pelo YOLO."""
+        annotated = chatbot.get_last_annotated_frame()
         
+        if annotated is not None:
+            # Redimensiona para o tamanho do preview
+            preview_size = (240, 180)
+            resized = annotated.resize(preview_size, Image.Resampling.LANCZOS)
+            self._vision_photo = ImageTk.PhotoImage(resized)
+            self.vision_preview_label.config(image=self._vision_photo)
+        
+        self.root.after(200, self.update_vision_preview)
+
     def update_stats(self) -> None:
         """Atualiza os valores dos parâmetros do drone."""
         # FPS

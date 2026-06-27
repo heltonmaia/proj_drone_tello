@@ -66,56 +66,109 @@ def reset_openai_history():
         }
     ]
 
-def run_ai_local(text: str | None, frame: Image.Image) -> tuple[str, str | None, bool]:
+# Histórico local persistente
+local_history: list[dict] = []
+
+def reset_local_history():
+    """Limpa o histórico local e define a persona do sistema."""
+    global local_history
+    local_history = [
+        {"role": "system", "content": prompts.SYSTEM_INSTRUCTION_TEXT}
+    ]
+
+# Variável global para guardar a última imagem anotada (acessível pela UI)
+last_annotated_frame: Image.Image | None = None
+
+def run_ai_local(
+    text: str | None,
+    frame: Image.Image,
+    step: int = 0,
+    height: int = 0,
+    last_action: str = "Nenhuma",
+    max_steps: int = 4
+) -> tuple[str, str | None, bool]:
     """
-    Executa a IA localmente com Ollama retornando JSON.
-    Args:
-        text (str | None): Descrição do que o drone deve fazer.
-        frame (Image.Image): Frame da câmera do drone.
-    Returns:
-        tuple: (resposta formatada, comando técnico, continuar rota)
+    Executa a IA localmente com Ollama.
+    - Mantém histórico conversacional entre passos.
+    - Usa radar YOLO textual + imagem anotada (exposta para UI).
+    - Considera step, height, last_action e max_steps.
     """
+    global last_annotated_frame
+    
     try:
-        user_objective = text if text else 'Descreva a cena.'
-        scene_text = vision.extract_features_with_yolo(frame)
-
-        formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
-
-        base_instruction = prompts.get_ai_instruction(user_objective, formatted_log, height=0, step=0, max_steps=4)
-
-        # Regras adicionais específicas para o interpretador de radar
+        if step == 0:
+            reset_local_history()
+        
+        user_objective = text if text else "Analise a cena e decida o próximo passo."
+        
+        # Extrai features E imagem anotada
+        scene_text, annotated_img = vision.extract_features_with_yolo(frame, draw_boxes=True)
+        last_annotated_frame = annotated_img  # Disponível para a UI
+        
+        formatted_log = ", ".join(log_messages[-5:]) if log_messages else "Nenhum."
+        
+        # Usa o prompt correto conforme o passo
+        if step == 0:
+            base_instruction = prompts.get_ai_instruction(
+                user_objective, formatted_log, height, step, max_steps
+            )
+        else:
+            base_instruction = prompts.get_step_prompt(
+                user_objective, last_action, height, step, max_steps
+            )
+        
         radar_instruction = """
         ATENÇÃO PARA O RADAR:
         - Se o caminho frontal estiver bloqueado, GIRE ('cw 90') ou SUBA ('up 50'). NUNCA vá 'forward'.
         - Se o radar acusar CEGUEIRA (parede lisa), AFASTE-SE imediatamente ('back 50').
+        - Use o histórico de comandos para evitar repetir ações inúteis.
         """
-
-        response = ollama.chat(
-            model=config.LOCAL_MODEL_NAME,
-            messages=[
-                {'role': 'system', 'content': base_instruction + radar_instruction},
-                {'role': 'user', 'content': f"OBJETIVO: {user_objective}\n \
-                DESCRIÇÃO DA CENA:{scene_text}\n \
-                Gere o JSON."}
-            ],
-            options={'temperature': 0.1, 'num_predict': 150}
+        
+        user_content = (
+            f"OBJETIVO: {user_objective}\n"
+            f"DESCRIÇÃO DA CENA (YOLO):\n{scene_text}\n"
+            f"{radar_instruction}\n"
+            f"Gere o JSON."
         )
         
-        data = parser.parse_json_response(response['message']['content'])
+        # Atualiza histórico (substitui system prompt se for passo 0)
+        if step == 0:
+            local_history[0]["content"] = base_instruction + "\n" + radar_instruction
+        local_history.append({"role": "user", "content": user_content})
+        
+        response = ollama.chat(
+            model=config.LOCAL_MODEL_NAME,
+            messages=local_history,
+            options={"temperature": 0.1, "num_predict": 150}
+        )
+        
+        raw_output = response["message"]["content"]
+        
+        # Mantém resposta no histórico
+        local_history.append({"role": "assistant", "content": raw_output})
+        
+        data = parser.parse_json_response(raw_output)
         chat_display_text = (
+            f"[Passo {step + 1}/{max_steps} | Altura: {height}cm | Última: {last_action}]\n"
             f"Radar: {scene_text}\n\n"
             f"Análise: {data.get('analise', 'N/A')}\n"
             f"Plano: {data.get('plano', 'Sem plano.')}\n"
-            f"Comando: {data.get('comando', 'none')}"
+            f"Comando: {data.get('comando', 'none')}\n"
+            f"Continuar: {data.get('continua', False)}"
         )
-
-        return chat_display_text, data.get('comando', None), data.get('continua', False)
+        
+        return chat_display_text, data.get("comando", None), data.get("continua", False)
     
     except Exception as e:
         print(f"Erro em run_ai_local: {traceback.format_exc()}")
         return f"Erro Local: {str(e)}", None, False
 
-def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, max_steps: int=4) -> tuple[str, str | None, bool]:
+
+def get_last_annotated_frame() -> Image.Image | None:
+    """Retorna a última imagem anotada pelo YOLO (para a UI exibir)."""
+    return last_annotated_frame
+
+def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int=0, last_action: str = "Nenhuma", max_steps: int=4) -> tuple[str, str | None, bool]:
     """
     Executa a IA para gerar comandos de controle do drone via Gemini.
     Args:
@@ -123,18 +176,27 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         frame (Image.Image): Frame da câmera do drone.
         step (int): Passo atual na sequência de comandos.
         height (int): Altura atual do drone em cm.
+        last_action (str): Última ação executada.
         max_steps (int): Número máximo de passos permitidos.
     Returns:
         tuple: (resposta natural, comando técnico, continuar rota)
     """
     try:
-        user_text = text if text else 'Analise a cena.'
-        formatted_log = ", ".join(log_messages[-5:]) if log_messages else 'Nenhum.'
+        user_text = text if text else "Analise a cena."
+        formatted_log = ", ".join(log_messages[-5:]) if log_messages else "Nenhum."
 
-        system_prompt = prompts.get_ai_instruction(user_text, formatted_log, height, step, max_steps)
+        if step == 0:
+            system_prompt = prompts.get_ai_instruction(
+                user_text, formatted_log, height, step, max_steps
+            )
+        else:
+            # Combina instrução base + delta do passo com last_action
+            system_prompt = prompts.get_ai_instruction(
+                user_text, formatted_log, height, step, max_steps
+            ) + "\n" + prompts.get_step_prompt(user_text, last_action, height, step, max_steps)
+        
         frame_grid = vision.add_grid_to_image(frame)
-
-        # MUDANÇA AQUI: Chamada stateless (direta) em vez de chat_session
+        
         response = client_gemini.models.generate_content(
             model=config.GEMINI_MODEL_NAME,
             contents=[system_prompt, frame_grid],
@@ -144,15 +206,16 @@ def run_ai_gemini(text: str | None, frame: Image.Image, step: int=0, height: int
         if not response.candidates or not response.candidates[0].content:
             return "Erro: Bloqueio de Segurança Rígido.", None, False
         
-        data = parser.parse_json_response(response.text) # type: ignore
+        data = parser.parse_json_response(response.text)  # type: ignore
         
         chat_display_text = (
+            f"[Passo {step + 1}/{max_steps} | Altura: {height}cm | Última Ação: {last_action}]\n"
             f"Análise: {data.get('analise', 'N/A')}\n"
             f"Plano: {data.get('plano', 'Sem plano.')}\n"
             f"Comando: {data.get('comando', 'none')}\n"
             f"Continuar: {data.get('continua', False)}"
         )
-        return chat_display_text, data['comando'], data['continua']
+        return chat_display_text, data.get("comando", None), data.get("continua", False)
 
     except Exception as e:
         import traceback
@@ -227,8 +290,8 @@ def run_ai(text: str | None, frame: Image.Image, step: int=0, height: int=0, las
         tuple: (resposta natural, comando técnico, continuar rota)
     """
     if config.AI_PROVIDER == 'LOCAL':
-        return run_ai_local(text, frame)
+        return run_ai_local(text, frame, step, height, last_action, max_steps)
     elif config.AI_PROVIDER == 'OPENAI':
         return run_ai_openai(text, frame, step, height, last_action, max_steps)
     else:
-        return run_ai_gemini(text, frame, step, height, max_steps)
+        return run_ai_gemini(text, frame, step, height, last_action, max_steps)

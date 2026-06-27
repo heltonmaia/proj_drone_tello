@@ -2,3 +2,4 @@ drone
 .venv
 codes/modules/utils.py
 __pycache__
+*t.txt

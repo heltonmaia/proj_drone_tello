@@ -19,7 +19,7 @@ AI_PROVIDER = 'GEMINI'
 # AI_PROVIDER = 'OPENAI'
 
 LOCAL_MODEL_NAME = 'llama3'
-GEMINI_MODEL_NAME = 'gemini-2.5-flash'
+GEMINI_MODEL_NAME = 'gemini-3.0-flash'
 OPENAI_MODEL_NAME = 'gpt-4o-mini'
 
 OPENAI_API_KEY = utils.get_openai_key()

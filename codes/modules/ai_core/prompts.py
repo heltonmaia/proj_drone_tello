@@ -83,24 +83,19 @@ def get_ai_instruction(objective: str, history: str, height: int, step: int, max
             """
     
 def get_step_prompt(objective: str, last_action: str, height: int, step: int, max_steps: int) -> str:
-    """
-    Gera apenas o delta do prompt para o passo atual.
-    Args:
-        objective (str): Objetivo da missão.
-        last_action (str): Última ação executada pelo drone.
-        height (int): Altura atual do drone em cm.
-        step (int): Passo atual na sequência de comandos.
-        max_steps (int): Número máximo de passos permitidos.
-    Returns:
-        str: Prompt formatado para o passo atual.
-    """
     return f"""
     STATUS ATUAL:
     - Objetivo Global: "{objective}"
     - Passo: {step + 1}/{max_steps}
-    - Altura: {height} cm
+    - Altura: {height} cm (10cm = no chão, ainda não decolou)
     - Última Ação Executada: "{last_action}"
     
-    Analise a imagem atual e determine o próximo comando.
+    INSTRUÇÕES:
+    - NÃO repita a última ação se ela não surtiu efeito.
+    - Se a altura for 10cm e o objetivo exigir voo, PRIMEIRO faça 'takeoff'.
+    - Se restarem poucos passos, planeje um pouso seguro ('land').
+    - Avalie se o objetivo já foi cumprido; se sim, defina "continua": false.
+    
+    Analise a imagem atual e o radar textual. Determine o próximo comando.
     Siga a formatação JSON obrigatória.
     """
