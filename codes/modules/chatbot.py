@@ -42,7 +42,7 @@ client_gemini = genai.Client(api_key=config.GEMINI_API_KEY)
 
 # A configuração agora usa types.GenerateContentConfig
 gemini_config = types.GenerateContentConfig(
-    temperature=0.7,
+    temperature=0.4,
     top_p=0.95,
     top_k=40,
     max_output_tokens=2048,

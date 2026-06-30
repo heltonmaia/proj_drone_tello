@@ -12,6 +12,7 @@ Principais Funcionalidades:
     - Área de chat para interação com a LLM.
     - Gerenciamento de logs de comandos e execução de sequências.
     - Botões de controle manual (decolagem, pouso, emergência).
+    - Modo de confirmação manual de comandos (desativando o Modo Automático).
 """
 
 import tkinter as tk
@@ -37,6 +38,37 @@ LBF_COLOR = "#3c3c3c"
 SAMPLE_RATE = 44100
 AUDIO_DURATION = 5
 
+
+class ToolTip:
+    """Classe para exibir tooltips ao passar o mouse sobre um widget."""
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self.tooltip_window: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._show)
+        widget.bind("<Leave>", self._hide)
+
+    def _show(self, event: tk.Event | None = None) -> None:
+        x = self.widget.winfo_rootx() + 25
+        y = self.widget.winfo_rooty() + 25
+
+        self.tooltip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+
+        label = tk.Label(
+            tw, text=self.text, justify="left",
+            background="#ffffe0", relief="solid", borderwidth=1,
+            font=("Ubuntu", 10), wraplength=250
+        )
+        label.pack(ipadx=4, ipady=2)
+
+    def _hide(self, event: tk.Event | None = None) -> None:
+        if self.tooltip_window:
+            self.tooltip_window.destroy()
+            self.tooltip_window = None
+
+
 class TelloGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -49,11 +81,12 @@ class TelloGUI:
         style.theme_use("clam")
         style.configure('TFrame', background=BG_COLOR)
         style.configure('TLabel', background=BG_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 16))
-        style.configure('Bold.TLabel', background=BG_COLOR, foreground='white', font=('Ubuntu', 16, 'bold')) # Um estilo customizado para negrito
+        style.configure('Bold.TLabel', background=BG_COLOR, foreground='white', font=('Ubuntu', 16, 'bold'))
         style.configure('TButton', background='#555555', foreground='white', borderwidth=1, focusthickness=3, focuscolor='none')
-        style.map('TButton', background=[('active', "#939393")]) # Cor quando o mouse está sobre
+        style.map('TButton', background=[('active', "#939393")])
         style.configure('TLabelframe', background=LBF_COLOR, bordercolor=TEXT_COLOR)
         style.configure('TLabelframe.Label', background=LBF_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 16))
+        style.configure('TCheckbutton', background=LBF_COLOR, foreground=TEXT_COLOR, font=('Ubuntu', 12))
 
         # Inicializa o Tello e outros componentes
         self.tello = TelloZune()
@@ -68,21 +101,26 @@ class TelloGUI:
         ####
 
         self.command_log = tello_control.log_messages
-        self.webcam = cv2.VideoCapture(0) # Inicializa a webcam
+        self.webcam = cv2.VideoCapture(0)
         self.video_frame = None
         self.fps_counter = 0
         self.video_size = (800, 600)
         self.tello.set_image_size(self.video_size)
         self.last_time_fps = time.time()
-        self.fps = 0 # FPS calculado
+        self.fps = 0
         self.is_sequence_running = False
         self.max_steps = "4"
         self.drone_height = 0 # cm
         self.abort_sequence_event = threading.Event()
 
+        # Variáveis para confirmação manual de comandos
+        self.auto_mode_var = tk.BooleanVar(value=True)
+        self._confirmation_event = threading.Event()
+        self._confirmation_result = False
+
         # Configurações de layout da janela
-        self.root.columnconfigure(0, weight=3) # Coluna do vídeo (75%)
-        self.root.columnconfigure(1, weight=1) # Coluna de controle (25%)
+        self.root.columnconfigure(0, weight=3)
+        self.root.columnconfigure(1, weight=1)
         self.root.rowconfigure(0, weight=1)
 
         # Frame principal para o vídeo e chat
@@ -99,17 +137,14 @@ class TelloGUI:
         right_frame.rowconfigure(1, weight=1)
 
         # --- Componentes da Interface ---
-        # Label para o vídeo
         self.video_label = tk.Label(main_frame, anchor="n")
         self.video_label.grid(row=0, column=0, sticky="nsew")
 
-        # Container para chat
         chat_frame = ttk.Frame(main_frame)
         chat_frame.grid(row=1, column=0, sticky="nsew", pady=(10, 0))
         chat_frame.columnconfigure(0, weight=1)
         self._create_chat_widgets(chat_frame)
 
-        # Container para controles (sidebar) e parâmetros
         self._create_sidebar_widgets(right_frame)
         self._create_params_widgets(right_frame)
 
@@ -117,7 +152,6 @@ class TelloGUI:
         self.update_video_frame()
         self.update_stats()
         
-        # Garantir que o drone pouse ao fechar a janela
         self.root.protocol("WM_DELETE_WINDOW", self._exit)
 
     def _create_chat_widgets(self, container: ttk.Frame) -> None:
@@ -129,31 +163,18 @@ class TelloGUI:
         container.rowconfigure(0, weight=0)
         container.rowconfigure(1, weight=1)
         container.rowconfigure(2, weight=0)
-        
-        # Display da resposta do usuário
-        self.response_label_user = ttk.Label(
-            container, text="", font=("Ubuntu", 16), wraplength=800, justify="left"
-        )
+        self.response_label_user = ttk.Label(container, text="", font=("Ubuntu", 16), wraplength=800, justify="left")
         self.response_label_user.grid(row=0, column=0, sticky="sew", pady=(0, 5))
-        
-        # Frame que contém o chat text (esquerda) + preview YOLO (direita)
-        ai_response_container = ttk.Frame(container)
-        ai_response_container.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
-        ai_response_container.rowconfigure(0, weight=1)
-        ai_response_container.columnconfigure(0, weight=3)
-        ai_response_container.columnconfigure(1, weight=1)
-        
-        self.ai_response_frame = ttk.Frame(ai_response_container)
-        self.ai_response_frame.grid(row=0, column=0, sticky="nsew")
+        self.ai_response_frame = ttk.Frame(container)
+        self.ai_response_frame.grid(row=1, column=0, sticky="nsew", pady=(0, 5))
         self.ai_response_frame.rowconfigure(0, weight=1)
         self.ai_response_frame.columnconfigure(0, weight=1)
-        
         self.response_text_ai = tk.Text(
             self.ai_response_frame,
             wrap="word",
             height=8,
             state="disabled",
-            font=("Ubuntu", 14),
+            font=("Ubuntu", 16),
             bg=LBF_COLOR,
             fg=TEXT_COLOR,
             borderwidth=0,
@@ -164,37 +185,16 @@ class TelloGUI:
         scrollbar = ttk.Scrollbar(self.ai_response_frame, command=self.response_text_ai.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.response_text_ai.config(yscrollcommand=scrollbar.set)
-        
-        # --- NOVO: Painel de preview da visão da IA ---
-        vision_frame = ttk.LabelFrame(ai_response_container, text="Visão da IA (YOLO)")
-        vision_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        vision_frame.rowconfigure(0, weight=1)
-        vision_frame.columnconfigure(0, weight=1)
-        
-        self.vision_preview_label = tk.Label(vision_frame, bg="black", anchor="center")
-        self.vision_preview_label.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
-        
-        # Placeholder inicial
-        placeholder = Image.new("RGB", (240, 180), color="black")
-        self._vision_photo = ImageTk.PhotoImage(placeholder)
-        self.vision_preview_label.config(image=self._vision_photo)
-        
-        # Inicia loop de atualização do preview
-        if chatbot.AI_PROVIDER == "LOCAL":
-            self.update_vision_preview()
-        
-        # Input
+
         input_frame = ttk.Frame(container)
         input_frame.grid(row=2, column=0, sticky="ew", pady=5)
         input_frame.columnconfigure(0, weight=1)
-        ttk.Label(input_frame, text="Envie um comando para o drone:", font=("Ubuntu", 16)).grid(
-            row=0, column=0, columnspan=2, sticky="w"
-        )
+        ttk.Label(input_frame, text="Envie um comando para o drone:", font=("Ubuntu", 16)).grid(row=0, column=0, columnspan=2, sticky="w")
         self.text_input_entry = ttk.Entry(input_frame)
         self.text_input_entry.grid(row=1, column=0, sticky="ew")
         self.send_text_button = ttk.Button(input_frame, text="Enviar", command=self.send_ai_command)
-        self.send_text_button.grid(row=1, column=1, padx=(5, 0))
-        self.root.bind("<Return>", lambda event: self.send_ai_command())
+        self.send_text_button.grid(row=1, column=1, padx=(5,0))
+        self.root.bind('<Return>', lambda event: self.send_ai_command())
 
         self.start_record_button = ttk.Button(input_frame, text="Iniciar Gravação", command=self.start_recording)
         self.start_record_button.grid(row=2, column=0, sticky="s", pady=(10, 0), padx=(0, 5))
@@ -233,6 +233,37 @@ class TelloGUI:
 
         ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=5, padx=5)
 
+        # --- Checkbox Modo Automático com ícone Info ---
+        auto_mode_frame = ttk.Frame(sidebar_frame)
+        auto_mode_frame.pack(fill='x', padx=5, pady=5)
+
+        auto_checkbox = ttk.Checkbutton(
+            auto_mode_frame,
+            text="Modo Automático",
+            variable=self.auto_mode_var
+        )
+        auto_checkbox.pack(side="left")
+
+        info_label = tk.Label(
+            auto_mode_frame,
+            text="ℹ",
+            fg="#6699ff",
+            bg=LBF_COLOR,
+            font=("Ubuntu", 14, "bold"),
+            cursor="question_arrow"
+        )
+        info_label.pack(side="left", padx=(8, 0))
+
+        tooltip_text = (
+            "Modo Automático: Quando ativado, o drone executa todos os comandos "
+            "gerados pela IA sem necessidade de confirmação.\n\n"
+            "Quando desativado, cada comando requer sua aprovação manual antes "
+            "de ser enviado ao drone."
+        )
+        ToolTip(info_label, tooltip_text)
+
+        ttk.Separator(sidebar_frame, orient='horizontal').pack(fill='x', pady=5, padx=5)
+
         log_frame = ttk.Frame(sidebar_frame)
         log_frame.pack(fill='both', expand=True, padx=5, pady=5)
         ttk.Label(log_frame, text="Log").pack(anchor="w")
@@ -264,7 +295,7 @@ class TelloGUI:
         self.param_labels = {}
         
         params_info = {
-            'battery': ("icons/battery_icon.png", "%"), # (icon_path, unit)
+            'battery': ("icons/battery_icon.png", "%"),
             'fps': ("icons/fps_icon.png", "fps"),
             'height': ("icons/height_icon.png", "cm"),
             'temp': ("icons/temp_icon.png", "°C"),
@@ -335,8 +366,7 @@ class TelloGUI:
             return
 
         user_text = self.text_input_entry.get()
-
-        self.text_input_entry.delete(0, tk.END) # Limpa a caixa de entrada de texto
+        self.text_input_entry.delete(0, tk.END)
 
         threading.Thread(
             target=self._execute_ai_sequence,
@@ -381,15 +411,102 @@ class TelloGUI:
         cmd = parts[0].lower()
         val = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
 
-        # Rotações são lentas. ~2s para 90 graus é uma margem segura + estabilização
         if cmd in ['cw', 'ccw']:
             return (val / 90.0) * 1.5 + 1.5
         
-        # Movimentos lineares
         if cmd in ['forward', 'back', 'left', 'right', 'up', 'down']:
-            return (val / 100.0) * 1.0 + 1.5 # 1s a cada 100cm + 1.5s de inércia
+            return (val / 100.0) * 1.0 + 1.5
             
-        return 3.0 # Takeoff/Land
+        return 3.0
+
+    # --- Funções de Confirmação Manual de Comandos ---
+
+    def _show_command_confirmation_dialog(self, command: str) -> None:
+        """
+        Exibe o dialog de confirmação na thread principal.
+        Deve ser chamado via root.after().
+        Args:
+            command (str): O comando a ser confirmado.
+        """
+        self._confirmation_result = False
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Confirmação de Comando")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.configure(bg=LBF_COLOR)
+
+        # Tamanho e centralização
+        dialog_width = 420
+        dialog_height = 140
+        dialog.geometry(f"{dialog_width}x{dialog_height}")
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (dialog_width // 2)
+        y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (dialog_height // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        # Label com a pergunta
+        question_label = ttk.Label(
+            dialog,
+            text=f"Enviar ao drone ({command})?",
+            font=("Ubuntu", 14),
+            wraplength=380,
+            justify="center"
+        )
+        question_label.pack(pady=(25, 15))
+
+        # Frame para os botões
+        btn_frame = ttk.Frame(dialog)
+        btn_frame.pack(pady=(0, 20))
+
+        def on_accept() -> None:
+            self._confirmation_result = True
+            dialog.destroy()
+
+        def on_decline() -> None:
+            self._confirmation_result = False
+            dialog.destroy()
+
+        accept_btn = ttk.Button(btn_frame, text="Aceitar", command=on_accept, width=12)
+        accept_btn.pack(side="left", padx=10)
+
+        decline_btn = ttk.Button(btn_frame, text="Recusar", command=on_decline, width=12)
+        decline_btn.pack(side="left", padx=10)
+
+        # Foca no botão Aceitar por padrão
+        accept_btn.focus_set()
+
+        # Fecha com Escape (equivale a Recusar)
+        dialog.bind("<Escape>", lambda e: on_decline())
+
+        # Espera o dialog fechar
+        self.root.wait_window(dialog)
+
+        # Sinaliza a thread worker que o usuário respondeu
+        self._confirmation_event.set()
+
+    def _request_command_confirmation(self, command: str) -> bool:
+        """
+        Solicita confirmação do usuário para um comando.
+        Deve ser chamado da thread worker. Bloqueia até o usuário responder.
+        Args:
+            command (str): O comando a ser confirmado.
+        Returns:
+            bool: True se o usuário aceitou, False se recusou.
+        """
+        self._confirmation_event.clear()
+        self._confirmation_result = False
+
+        # Agenda a exibição do dialog na thread principal
+        self.root.after(0, self._show_command_confirmation_dialog, command)
+
+        # Aguarda a resposta do usuário
+        self._confirmation_event.wait()
+
+        return self._confirmation_result
+
+    # --- Execução de Sequência da IA ---
 
     def _execute_ai_sequence(self, user_text: str) -> None:
         """
@@ -401,14 +518,15 @@ class TelloGUI:
         self.abort_sequence_event.clear()
         self.root.after(0, self._set_ui_for_sequence, True)
 
-        MAX_STEPS = int(self.max_steps)
+        MAX_STEPS = 1 if chatbot.AI_PROVIDER == 'LOCAL' else int(self.max_steps)
         current_frame = self._get_frame()
+        
         last_action = "Nenhuma."
-        recent_actions = []
 
         try:
             for step in range(MAX_STEPS):
                 current_frame = self._get_frame()
+                
                 prompt_text = user_text
 
                 response, command, continue_route = chatbot.run_ai(
@@ -420,34 +538,42 @@ class TelloGUI:
                     max_steps=MAX_STEPS
                 )
 
-                display_text = user_text if step == 0 else f"Sequência passo {step + 1}/{MAX_STEPS}"
+                display_text = user_text if step == 0 else f"Sequência de comandos, passo {step + 1}/{MAX_STEPS}"
                 self.root.after(0, self.update_chat_display, display_text, response)
 
                 if command and chatbot.validate_command(command):
-                    recent_actions.append(command)
-                    if len(recent_actions) >= 3 and len(set(recent_actions[-3:])) == 1:
-                        print(f"Loop detectado: '{command}' repetido 3x. Abortando.")
-                        self.root.after(0, self.update_log, f"LOOP: {command} x3 (abortado)")
-                        break
-                    
+                    # --- Verifica o Modo Automático ---
+                    if not self.auto_mode_var.get():
+                        accepted = self._request_command_confirmation(command)
+                        if not accepted:
+                            self.root.after(0, self.update_log, f'{step + 1}: RECUSADO - {command}')
+                            # Se estava em uma sequência, cancela ali
+                            if step > 0 or continue_route:
+                                break
+                            # Se era um movimento simples, apenas não envia e encerra o loop
+                            last_action = "Comando recusado pelo usuário."
+                            break
+
                     last_action = command
                     tello_control.process_ai_command(self.tello, command)
-                    self.root.after(0, self.update_log, f"{step + 1}: {command}")
+                    self.root.after(0, self.update_log, f'{step + 1}: {command}')
                     
                     wait_time = self._calculate_wait_time(command)
-                    if self.abort_sequence_event.wait(wait_time):
+                    
+                    was_interrupted = self.abort_sequence_event.wait(wait_time)
+                    if was_interrupted:
+                        print("Sequência abortada durante espera.")
                         break
                 else:
                     last_action = "Nenhum comando."
-                    if not continue_route:
-                        break
+                    print(f"Sem comando válido no passo {step}.")
+                    if not continue_route: break
 
                 if not continue_route:
                     break
                 
                 if not command:
-                    if self.abort_sequence_event.wait(2):
-                        break
+                    if self.abort_sequence_event.wait(2): break
 
         except Exception as e:
             print(f"Erro seq: {e}")
@@ -463,10 +589,7 @@ class TelloGUI:
         Args:
             is_running (bool): Indica se a sequência está em execução.
         """
-        if is_running:
-            state = "disabled"
-        else:
-            state = "normal"
+        state = "disabled" if is_running else "normal"
 
         self.send_text_button.config(state=state)
         self.start_record_button.config(state=state)
@@ -479,10 +602,8 @@ class TelloGUI:
     def update_video_frame(self) -> None:
         """Captura, processa e exibe um novo frame de vídeo."""
         frame = self.tello.get_frame()
-        # frame = self.webcam.read()[1] # Ativar webcam
         img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Garante que temos um array válido antes de prosseguir.
         if isinstance(img_rgb, np.ndarray):
             self.img_ai = Image.fromarray(img_rgb)
             photo = ImageTk.PhotoImage(image=self.img_ai)
@@ -493,28 +614,11 @@ class TelloGUI:
         self.video_label.config(image=photo)
         self._video_frame = photo
 
-        # Contagem de frames para cálculo do FPS
         self.fps_counter += 1
-
-        # Agenda a próxima atualização
         self.root.after(33, self.update_video_frame)
-
-    def update_vision_preview(self) -> None:
-        """Atualiza o preview da última imagem anotada pelo YOLO."""
-        annotated = chatbot.get_last_annotated_frame()
         
-        if annotated is not None:
-            # Redimensiona para o tamanho do preview
-            preview_size = (240, 180)
-            resized = annotated.resize(preview_size, Image.Resampling.LANCZOS)
-            self._vision_photo = ImageTk.PhotoImage(resized)
-            self.vision_preview_label.config(image=self._vision_photo)
-        
-        self.root.after(200, self.update_vision_preview)
-
     def update_stats(self) -> None:
         """Atualiza os valores dos parâmetros do drone."""
-        # FPS
         now = time.time()
         time_fps = now - self.last_time_fps
         if time_fps > 0:
@@ -526,7 +630,6 @@ class TelloGUI:
         stats = self.tello.get_info()
         bat, self.drone_height, temph, pres, time_elapsed = stats
 
-        # Atualiza os labels
         self._update_param_label('fps', int_fps)
         self._update_param_label('battery', bat)
         self._update_param_label('height', self.drone_height) if self.drone_height is not None else self._update_param_label('height', 10)
@@ -534,7 +637,6 @@ class TelloGUI:
         self._update_param_label('pres', pres)
         self._update_param_label('time', time_elapsed)
 
-        # Agendar a próxima atualização a cada segundo
         self.root.after(1000, self.update_stats)
 
     def _update_param_label(self, key: str, value: int | float) -> None:
@@ -557,14 +659,13 @@ class TelloGUI:
         """
         tello_control.log_messages.append(message)
         
-        # Atualiza a Listbox
         self.log_listbox.delete(0, tk.END)
         for log in reversed(tello_control.log_messages):
             self.log_listbox.insert(0, log)
 
     def update_chat_display(self, user_msg: str, ai_msg: str) -> None:
         """
-        Atualiza os labels do chat, agora usando um widget Text para a resposta da IA.
+        Atualiza os labels do chat.
         """
         self.response_label_user.config(text=user_msg)
 
@@ -590,7 +691,6 @@ class TelloGUI:
                 audio_for_recognition = recognizer.record(source)
             
             transcribed_text = recognizer.recognize_google(audio_for_recognition, language='pt-BR') # type: ignore
-            # transcribed_text = recognizer.recognize_sphinx(audio_for_recognition, language='pt-BR') # type: ignore
             print(f"Texto reconhecido: '{transcribed_text}'")
             return transcribed_text
         except sr.UnknownValueError:
